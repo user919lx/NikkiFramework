@@ -50,13 +50,12 @@ local function _log_message(level_name, level_value, ...)
     end
     local timestamp = os.time()
     local formatted_time = os.date("%Y-%m-%d %H:%M:%S", timestamp)
-    local output = string.format("[%s] %s - %s", formatted_time, level_name, message)
+    local output = string.format("[%s] [NikkiFramework] %s %s", formatted_time, level_name, message)
     print(output)
 end
 
 
 for name, value in pairs(LEVELS) do
-    -- 为每个级别创建独立的函数，添加到 log 表中
     log[string.lower(name)] = function(...)
         _log_message(name, value, ...)
     end

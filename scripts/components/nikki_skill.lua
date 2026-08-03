@@ -1,7 +1,6 @@
 -- scripts/components/nikki_skill.lua
 local NikkiComponentBase = require("components/nikki_component_base")
 local log = require("utils/log")
-log.set_level("debug")
 
 -- ============================================
 -- 1. 资源适配器 (纯组件内部工具)

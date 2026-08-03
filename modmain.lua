@@ -1,3 +1,8 @@
+local log = GLOBAL.require("utils/log")
+local is_debug_mode = GetModConfigData("debug_mode")
+if is_debug_mode then
+    log.set_level("debug")
+end
 PrefabFiles = {
     "nikki_spell_caster",
     "nikki_range_indicator",

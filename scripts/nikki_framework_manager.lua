@@ -1,6 +1,5 @@
 -- scripts/nikki_framework_manager.lua
 local log = require("utils/log")
-log.set_level("debug")
 
 local SkillResolver = require("resolvers/skill_resolver")
 local StateResolver = require("resolvers/state_resolver")

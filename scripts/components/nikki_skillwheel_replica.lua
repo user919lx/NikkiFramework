@@ -1,5 +1,4 @@
 local log = require("utils/log")
-log.set_level("debug")
 
 local NikkiSkillWheelReplica = Class(function(self, inst)
     self.inst = inst

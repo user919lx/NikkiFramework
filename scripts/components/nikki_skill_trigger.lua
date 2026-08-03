@@ -1,7 +1,6 @@
 -- scripts/components/nikki_skill_trigger.lua
 local NikkiComponentBase = require("components/nikki_component_base")
 local log = require("utils/log")
-log.set_level("debug")
 
 local NikkiSkillTrigger = Class(NikkiComponentBase, function(self, inst)
     NikkiComponentBase._ctor(self, inst)

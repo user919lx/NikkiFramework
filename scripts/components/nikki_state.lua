@@ -1,7 +1,6 @@
 -- scripts/components/nikki_state.lua
 local NikkiComponentBase = require("components/nikki_component_base")
 local log = require("utils/log")
-log.set_level("debug")
 
 
 local function on_state(self, state)

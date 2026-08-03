@@ -1,5 +1,4 @@
 local log = require("utils/log")
-log.set_level("debug")
 local TEXTURE_SIZE = 1900
 local assets = {
     Asset("ANIM", "anim/firefighter_placement.zip"),

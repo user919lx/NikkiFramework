@@ -1,6 +1,5 @@
 local BaseResolver = require("resolvers/base_resolver")
 local log = require("utils/log")
-log.set_level("debug")
 
 local StateResolver = Class(BaseResolver, function(self, defs)
     BaseResolver._ctor(self, defs or {})
