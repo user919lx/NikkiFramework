@@ -1,58 +1,189 @@
 -- scripts/nikki_framework_manager.lua
 local log = require("utils/log")
-
+local EffectResolver = require("resolvers/effect_resolver")
 local SkillResolver = require("resolvers/skill_resolver")
 local StateResolver = require("resolvers/state_resolver")
 local ResolverRegistry = require("nikki_resolver_registry")
 
-local function HookActionForSkill(action_id)
-    local action = ACTIONS[action_id]
-    if not action or action._nikki_hooked then return end
+-- ========================================================
+-- 调试打印工具 (改造为字符串拼接模式，交由 log 系统输出)
+-- ========================================================
+local function FormatTableToString(tab, indent, seen, out)
+    indent = indent or 0
+    seen = seen or {}
+    out = out or {} -- 字符串数组容器
 
-    local old_fn = action.fn
-    action.fn = function(act)
-        local orig_res = old_fn and old_fn(act) or nil
-        if act.doer and act.doer.components.nikki_skill_trigger then
-            local params = {
-                target = act.target,
-                doer = act.doer,
-                pos = act:GetActionPoint(),
-                invobject = act.invobject,
-                orig_result = orig_res,
-            }
-            local skill_res = act.doer.components.nikki_skill_trigger:CastAction(act.action.id, params)
-            if old_fn == nil then return skill_res end
-        end
-        return orig_res
+    if type(tab) ~= "table" then
+        table.insert(out, string.rep(" ", indent) .. tostring(tab))
+        return out
     end
-    action._nikki_hooked = true
+    if seen[tab] then
+        table.insert(out, string.rep(" ", indent) .. "<循环引用>")
+        return out
+    end
+    seen[tab] = true
+
+    local indent_str = string.rep("  ", indent)
+    local array_part = {}
+    local max_index = 0
+    for i = 1, #tab do
+        if tab[i] ~= nil then
+            table.insert(array_part, { index = i, value = tab[i] })
+            max_index = i
+        end
+    end
+
+    local other_part = {}
+    for k, v in pairs(tab) do
+        if type(k) ~= "number" or k > max_index or k < 1 or math.floor(k) ~= k then
+            table.insert(other_part, { key = k, value = v })
+        end
+    end
+
+    table.sort(other_part, function(a, b)
+        local type_a, type_b = type(a.key), type(b.key)
+        if type_a ~= type_b then return type_a < type_b end
+        return tostring(a.key) < tostring(b.key)
+    end)
+
+    table.insert(out, indent_str .. "{")
+    for _, item in ipairs(array_part) do
+        local value = item.value
+        if type(value) == "table" then
+            table.insert(out, indent_str .. "  [" .. item.index .. "] =")
+            FormatTableToString(value, indent + 2, seen, out)
+        else
+            local value_str = type(value) == "string" and "\"" .. value .. "\"" or tostring(value)
+            table.insert(out, indent_str .. "  [" .. item.index .. "] = " .. value_str)
+        end
+    end
+
+    for _, item in ipairs(other_part) do
+        local key_str = (type(item.key) == "string" and string.match(item.key, "^[%a_][%a%d_]*$")) and item.key or
+            "[" .. tostring(item.key) .. "]"
+        local value = item.value
+        if type(value) == "table" then
+            table.insert(out, indent_str .. "  " .. key_str .. " =")
+            FormatTableToString(value, indent + 2, seen, out)
+        else
+            local value_str = type(value) == "string" and "\"" .. value .. "\"" or tostring(value)
+            table.insert(out, indent_str .. "  " .. key_str .. " = " .. value_str)
+        end
+    end
+    table.insert(out, indent_str .. "}")
+    seen[tab] = nil
+
+    return out
 end
 
--- 【新增】：智能混入全局默认触发器
-local function MergeDefaultTriggers(state_data, default_triggers)
-    if not default_triggers or type(default_triggers) ~= "table" then return end
-    for _, state_def in pairs(state_data) do
-        state_def.triggers = state_def.triggers or {}
-        for category, items in pairs(default_triggers) do
-            state_def.triggers[category] = state_def.triggers[category] or {}
-            if type(items) == "table" then
-                -- 处理数组 (如 wheel)
-                if items[1] ~= nil then
-                    for _, v in ipairs(items) do
-                        table.insert(state_def.triggers[category], v)
-                    end
-                    -- 处理字典 (如 keys, actions, events)
-                else
-                    for k, v in pairs(items) do
-                        -- 仅当该形态没有覆盖该键位时，才填入默认值
-                        if state_def.triggers[category][k] == nil then
-                            state_def.triggers[category][k] = v
-                        end
-                    end
+local function DumpTableToLog(tab)
+    local lines = FormatTableToString(tab, 2, {}, {})
+    return table.concat(lines, "\n")
+end
+
+-- ========================================================
+-- 核心编译逻辑
+-- ========================================================
+local function MergeArrays(base, overlay)
+    local res, seen = {}, {}
+    for _, v in ipairs(base or {}) do
+        if not seen[v] then
+            table.insert(res, v); seen[v] = true
+        end
+    end
+    for _, v in ipairs(overlay or {}) do
+        if not seen[v] then
+            table.insert(res, v); seen[v] = true
+        end
+    end
+    return res
+end
+
+local function ApplyTriggerOverrides(target, source)
+    if not source then return end
+    for t_type, t_dict in pairs(source) do
+        target[t_type] = target[t_type] or {}
+        for k, v in pairs(t_dict) do
+            if v == false then
+                target[t_type][k] = nil
+            elseif type(v) == "string" then
+                target[t_type][k] = { [v] = true }
+            elseif type(v) == "table" then
+                target[t_type][k] = target[t_type][k] or {}
+                for sub_k, sub_v in pairs(v) do
+                    if sub_v == false then target[t_type][k][sub_k] = nil else target[t_type][k][sub_k] = true end
                 end
             end
         end
     end
+end
+
+-- 接收动态的 basic_state_name
+local function PrecompileStates(state_data, skill_data, basic_state_name)
+    local basic = state_data[basic_state_name] or {}
+
+    for state_name, state_def in pairs(state_data) do
+        if state_name ~= basic_state_name then
+            state_def.skills = MergeArrays(basic.skills, state_def.skills)
+            state_def.effects = MergeArrays(basic.effects, state_def.effects)
+            state_def.tags = MergeArrays(basic.tags, state_def.tags)
+            state_def.wheel = MergeArrays(basic.wheel, state_def.wheel)
+
+            local compiled_triggers = { keys = {}, actions = {}, events = {} }
+
+            if skill_data then
+                for _, skill_id in ipairs(state_def.skills) do
+                    local s_def = skill_data[skill_id]
+                    if s_def and s_def.default_triggers then
+                        for t_type, t_dict in pairs(s_def.default_triggers) do
+                            compiled_triggers[t_type] = compiled_triggers[t_type] or {}
+                            for k, v in pairs(t_dict) do
+                                if v then
+                                    compiled_triggers[t_type][k] = compiled_triggers[t_type][k] or {}
+                                    compiled_triggers[t_type][k][skill_id] = true
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            ApplyTriggerOverrides(compiled_triggers, basic.triggers)
+            ApplyTriggerOverrides(compiled_triggers, state_def.triggers)
+            state_def.compiled_triggers = compiled_triggers
+
+            -- 编译期输出结果 (完美使用 log.debug 拼接输出)
+            local dump_str = DumpTableToLog(compiled_triggers)
+            log.debug("\n==================================================\n" ..
+                "[NikkiFramework] Compiled state: '" .. tostring(state_name) .. "'\n" ..
+                "Compiled Triggers Data:\n" .. dump_str ..
+                "\n==================================================")
+        end
+    end
+end
+
+local function HookActionForSkill(action_id)
+    local action = ACTIONS[action_id]
+    if not action or action._nikki_hooked then return end
+    local old_fn = action.fn
+    action.fn = function(act)
+        local origin_result = old_fn and old_fn(act) or nil
+        if act.doer and act.doer.components.nikki_skill_trigger then
+            -- 融合你的完美提议：既保留标准字段，又暴露原始 act
+            local params = {
+                act = act, -- 暴露原始动作上下文
+                target = act.target,
+                pos = type(act.GetActionPoint) == "function" and act:GetActionPoint() or nil,
+                doer = act.doer,
+                invobject = act.invobject,
+                origin_result = origin_result
+            }
+            local skill_res = act.doer.components.nikki_skill_trigger:CastAction(act.action.id, params)
+            if old_fn == nil then return skill_res end
+        end
+        return origin_result
+    end
+    action._nikki_hooked = true
 end
 
 local NikkiFrameworkManager = {}
@@ -62,71 +193,61 @@ function NikkiFrameworkManager.Init(config, mod_env)
 
     for profile_name, profile_data in pairs(config) do
         local profile_resolvers = {}
+        local raw_skill_data, raw_state_data = nil, nil
 
-        if profile_data.skill then
-            local skill_data = require(profile_data.skill)
-            if type(skill_data) == "table" and next(skill_data) then
-                profile_resolvers.skill = SkillResolver(skill_data)
+        -- 读取 config 配置
+        local basic_state = profile_data.basic_state or "basic"
+        local default_state = profile_data.default_state or "default"
+
+        if profile_data.effect then
+            local effect_data = require(profile_data.effect)
+            if effect_data then
+                profile_resolvers.effect = EffectResolver(effect_data)
+                log.debug("[NikkiFramework] EffectResolver initialized for profile '%s' with %d effects", profile_name,
+                    table.count(effect_data))
             end
         end
-
+        if profile_data.skill then
+            raw_skill_data = require(profile_data.skill)
+            if raw_skill_data then
+                profile_resolvers.skill = SkillResolver(raw_skill_data)
+                log.debug("[NikkiFramework] SkillResolver initialized for profile '%s' with %d skills", profile_name,
+                    table.count(raw_skill_data))
+            end
+        end
         if profile_data.state then
-            local state_data = require(profile_data.state)
-            if type(state_data) == "table" and next(state_data) then
-                -- 【优化】：在生成 Resolver 之前，先混入 config 的默认 triggers
-                if profile_data.default and profile_data.default.triggers then
-                    MergeDefaultTriggers(state_data, profile_data.default.triggers)
-                end
+            raw_state_data = require(profile_data.state)
+            if raw_state_data then
+                -- 传入动态 basic_state 名字
+                PrecompileStates(raw_state_data, raw_skill_data, basic_state)
+                profile_resolvers.state = StateResolver(raw_state_data)
 
-                profile_resolvers.state = StateResolver(state_data)
-
-                for _, state_def in pairs(state_data) do
-                    if state_def.triggers and state_def.triggers.actions then
-                        for action_id, _ in pairs(state_def.triggers.actions) do
-                            HookActionForSkill(action_id)
-                        end
+                for state_name, state_def in pairs(raw_state_data) do
+                    if state_name ~= basic_state and state_def.compiled_triggers and state_def.compiled_triggers.actions then
+                        for action_id, _ in pairs(state_def.compiled_triggers.actions) do HookActionForSkill(action_id) end
                     end
                 end
+                log.debug("[NikkiFramework] StateResolver initialized for profile '%s' with default state '%s'",
+                profile_name, default_state)
             end
         end
 
         if profile_data.prefabs and type(profile_data.prefabs) == "table" then
             for _, prefab_name in ipairs(profile_data.prefabs) do
                 ResolverRegistry.Register(prefab_name, profile_resolvers)
-
                 mod_env.AddPrefabPostInit(prefab_name, function(inst)
-                    inst:DoTaskInTime(0, function()
-                        if not TheNet:IsDedicated() and inst == ThePlayer then
-                            local indicator = SpawnPrefab("nikki_range_indicator")
-                            indicator:Attach(inst)
-                        end
-                    end)
                     if not TheWorld.ismastersim then return end
-
-                    local core_components = {
-                        "nikki_skill",
-                        "nikki_skill_trigger",
-                        "nikki_skillwheel",
-                        "nikki_state"
-                    }
+                    local core_components = { "nikki_skill", "nikki_skill_trigger", "nikki_state", "nikki_effect" }
                     for _, comp_name in ipairs(core_components) do
-                        if not inst.components[comp_name] then
-                            inst:AddComponent(comp_name)
-                        end
+                        if not inst.components[comp_name] then inst:AddComponent(comp_name) end
                     end
-
-                    if profile_resolvers.skill then
-                        inst.components.nikki_skill:SetResolver(profile_resolvers.skill)
-                    end
-
+                    if profile_resolvers.effect then inst.components.nikki_effect:SetResolver(profile_resolvers.effect) end
+                    if profile_resolvers.skill then inst.components.nikki_skill:SetResolver(profile_resolvers.skill) end
                     if profile_resolvers.state then
-                        local default_state = profile_data.default and profile_data.default.state or "default"
+                        -- 使用 config 中的 default_state 初始化
                         inst.components.nikki_state:Init(profile_resolvers.state, default_state)
                     end
-
-                    if profile_data.default and profile_data.default.skills then
-                        inst.components.nikki_skill:AddSkills(profile_data.default.skills)
-                    end
+                    log.debug("[NikkiFramework] PostInit completed for prefab '%s' with profile '%s'", prefab_name, profile_name)
                 end)
             end
         end

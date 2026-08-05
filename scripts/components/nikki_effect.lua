@@ -1,0 +1,201 @@
+-- scripts/components/nikki_effect.lua
+local NikkiComponentBase = require("components/nikki_component_base")
+local log = require("utils/log")
+
+local NikkiEffect = Class(NikkiComponentBase, function(self, inst)
+    NikkiComponentBase._ctor(self, inst)
+
+    -- 结构: [effect_id] = { layers = 1, context = {}, timers = { task1, task2... } }
+    self._active_effects = {}
+
+    self.inst:ListenForEvent("death", function()
+        log.debug("[NikkiEffect] %s died, clearing all active effects.", tostring(self.inst))
+        self:Clear()
+    end)
+
+    self.inst:StartUpdatingComponent(self)
+end)
+
+-- 内部方法：添加定时器与时间队列
+function NikkiEffect:_AddTimer(id, duration, active_ref)
+    if not duration or duration <= 0 then return end
+
+    local end_time = GetTime() + duration
+    local task = self.inst:DoTaskInTime(duration, function()
+        self:Remove(id, false)
+    end)
+
+    -- 严格同步：定时器与时间戳队列同时入栈
+    table.insert(active_ref.timers, task)
+    table.insert(active_ref.context.end_times, end_time)
+end
+
+function NikkiEffect:HasEffect(id)
+    return self._active_effects[id] ~= nil
+end
+
+function NikkiEffect:GetLayers(id)
+    return self._active_effects[id] and self._active_effects[id].layers or 0
+end
+
+-- ============================================
+-- 公开 API：施加 Effect
+-- ============================================
+function NikkiEffect:Apply(id, source)
+    if not self.resolver then return false end
+
+    -- 安全屏障：若实体死亡则禁止挂载新效果
+    if self.inst.components.health and self.inst.components.health:IsDead() then
+        return false
+    end
+
+    local duration, max, mode = self.resolver:GetEffectConfig(id)
+    local active = self._active_effects[id]
+
+    -- 情况 A：首次挂载
+    if not active then
+        self._active_effects[id] = {
+            layers = 1,
+            timers = {},
+            context = {
+                layer = 1,
+                start_time = GetTime(),
+                end_times = {},  -- 时间队列 (先进先出)
+                source = source, -- 记录施法者，解决伤害归属
+                data = {},       -- 留给开发者的状态机黑盒
+                max = max,       -- 顺手把上限传进去
+                -- 供开发者在 fn 中直接获取剩余时间
+                GetTotalRemain = function(ctx)
+                    if #ctx.end_times == 0 then return 0 end
+                    return math.max(0, ctx.end_times[#ctx.end_times] - GetTime())
+                end,
+                GetNextRemain = function(ctx)
+                    if #ctx.end_times == 0 then return 0 end
+                    return math.max(0, ctx.end_times[1] - GetTime())
+                end
+            }
+        }
+        active = self._active_effects[id]
+
+        self.resolver:OnEffectStart(self.inst, id, active.context)
+        self.resolver:UpdateEffectLayers(self.inst, id, 1)
+        self:_AddTimer(id, duration, active) -- 传入 active 本身
+        return true
+    end
+
+    -- 情况 B：已经存在，处理叠加规则
+    if mode == "ignore" then
+        log.debug("[NikkiEffect] Effect %s is already active on %s, ignoring new application.", tostring(id),
+            tostring(self.inst))
+        return false
+    elseif mode == "refresh" then
+        -- 刷新：清除所有旧定时器与旧时间戳
+        for _, t in ipairs(active.timers) do t:Cancel() end
+        active.timers = {}
+        active.context.end_times = {} -- 必须同步清空
+        self:_AddTimer(id, duration, active)
+        return true
+    elseif mode == "add" then
+        -- 叠加：独立计算当前这层的时间
+        if active.layers < max then
+            active.layers = active.layers + 1
+            active.context.layer = active.layers
+            self.resolver:UpdateEffectLayers(self.inst, id, active.layers)
+            self:_AddTimer(id, duration, active)
+        else
+            -- 达到上限时：剔除最老的一层 (严格同步剔除 Task 和 end_times)
+            if #active.timers > 0 then
+                local oldest_timer = table.remove(active.timers, 1)
+                table.remove(active.context.end_times, 1) -- 严格同步出栈
+                if oldest_timer then oldest_timer:Cancel() end
+            end
+            self:_AddTimer(id, duration, active)
+        end
+        return true
+    end
+end
+
+-- ============================================
+-- 公开 API：移除 Effect
+-- force_all: true 则直接清空所有层数，false 则按层递减
+-- ============================================
+function NikkiEffect:Remove(id, force_all)
+    if not self.resolver or not self._active_effects[id] then return end
+
+    local active = self._active_effects[id]
+
+    -- 取消最早的一个定时器
+    if not force_all and #active.timers > 0 then
+        local timer = table.remove(active.timers, 1)
+        table.remove(active.context.end_times, 1) -- 严格同步出栈
+        if timer then timer:Cancel() end
+    end
+
+    local target_layer = force_all and 0 or (active.layers - 1)
+
+    if target_layer > 0 then
+        -- 还有剩余层数，仅降级
+        active.layers = target_layer
+        active.context.layer = target_layer
+        self.resolver:UpdateEffectLayers(self.inst, id, target_layer)
+    else
+        -- 层数归零，彻底注销
+        for _, t in ipairs(active.timers) do t:Cancel() end
+        self.resolver:OnEffectEnd(self.inst, id, active.context)
+        self._active_effects[id] = nil
+    end
+end
+
+-- ============================================
+-- 公开 API：查询 Effect 是否为永久效果（无 duration）
+-- ============================================
+function NikkiEffect:IsPermanent(id)
+    if not self.resolver then return false end
+    local duration, _, _ = self.resolver:GetEffectConfig(id)
+    -- 如果 duration 为 nil，说明是永久效果
+    return duration == nil
+end
+
+function NikkiEffect:Toggle(id)
+    if self:HasEffect(id) then
+        self:Remove(id, true)
+    else
+        self:Apply(id)
+    end
+end
+
+-- ============================================
+-- 清空所有激活的 Effect
+-- ============================================
+function NikkiEffect:Clear()
+    local active_ids = {}
+    for id, _ in pairs(self._active_effects) do
+        table.insert(active_ids, id)
+    end
+
+    for _, id in ipairs(active_ids) do
+        self:Remove(id, true)
+    end
+
+    self._active_effects = {}
+end
+
+-- ============================================
+-- 帧更新：只处理业务 Tick
+-- ============================================
+function NikkiEffect:OnUpdate(dt)
+    if not self.resolver then return end
+
+    -- 安全屏障：实体死亡后停止挂载的 fn 轮询
+    if self.inst.components.health and self.inst.components.health:IsDead() then
+        return
+    end
+
+    for id, active in pairs(self._active_effects) do
+        if self.resolver:HasFn(id) then
+            self.resolver:ExecuteFn(self.inst, id, dt, active.context)
+        end
+    end
+end
+
+return NikkiEffect
