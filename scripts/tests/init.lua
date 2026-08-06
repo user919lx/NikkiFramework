@@ -33,27 +33,29 @@ local init = {
     }
 }
 
+-- 安全执行单组测试，实现异常隔离
+local function SafeRunCategory(category_name, test_group)
+    print(string.format("\n================ %s 测试 ================", category_name))
+    for name, test_fn in pairs(test_group) do
+        local success, err_msg = xpcall(test_fn, debug.traceback)
+        if not success then
+            print(string.format("\n[x] 模块 [%s/%s] 运行时崩溃中断:\n%s\n", category_name, name, tostring(err_msg)))
+        end
+    end
+end
+
 function init.RunAll()
-    -- 核心：每次运行前清零全局计数器[cite: 38]
     TestUtils.ResetGlobalStats()
 
     print("\n\n>>>>>>> 启动全局自动化测试 <<<<<<<")
 
-    print("\n================ Core 核心层测试 ================")
-    for name, test_fn in pairs(init.core) do test_fn() end
-
-    print("\n================ Utils 测试 ================")
-    for name, test_fn in pairs(init.utils) do test_fn() end
-
-    print("\n================ Components 测试 ================")
-    for name, test_fn in pairs(init.components) do test_fn() end
-
-    print("\n================ Resolvers 测试 ================")
-    for name, test_fn in pairs(init.resolvers) do test_fn() end
+    SafeRunCategory("Core 核心层", init.core)
+    SafeRunCategory("Utils", init.utils)
+    SafeRunCategory("Components", init.components)
+    SafeRunCategory("Resolvers", init.resolvers)
 
     print("\n>>>>>>> 全局测试结束 <<<<<<<")
 
-    -- 核心：输出终极汇总面板[cite: 38]
     local total = TestUtils.global_test_count
     local pass = TestUtils.global_success_count
     local fail = total - pass
