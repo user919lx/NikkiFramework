@@ -1,11 +1,8 @@
--- scripts/tests/test_utils.lua
 local TestUtils = {
-    -- 新增：全局状态追踪
     global_test_count = 0,
     global_success_count = 0,
 }
 
--- 新增：重置全局统计（防止玩家在游戏里多次执行 ut.RunAll() 导致数据无限叠加）
 function TestUtils.ResetGlobalStats()
     TestUtils.global_test_count = 0
     TestUtils.global_success_count = 0
@@ -21,15 +18,14 @@ function TestUtils.CreateSuite(name)
 
     function suite:assert(condition, message)
         self.test_count = self.test_count + 1
-        TestUtils.global_test_count = TestUtils.global_test_count + 1 -- 累加到全局[cite: 37]
+        TestUtils.global_test_count = TestUtils.global_test_count + 1
 
         if condition then
             self.success_count = self.success_count + 1
-            TestUtils.global_success_count = TestUtils.global_success_count + 1 -- 累加到全局[cite: 37]
+            TestUtils.global_success_count = TestUtils.global_success_count + 1
             print(string.format("[✓] %s", message))
         else
             print(string.format("[x] 测试失败: %s", message))
-            -- 可以选择在这里加上 error() 中断测试，或者继续执行
         end
         return condition
     end
@@ -46,7 +42,12 @@ function TestUtils.CreateSuite(name)
             end
         end
         self.entities = {}
-        print(string.format("=== %s 测试汇总: %d/%d 通过 ===\n", self.name, self.success_count, self.test_count))
+
+        -- 区分全部通过与存在失败的明确状态
+        local is_all_passed = (self.success_count == self.test_count) and (self.test_count > 0)
+        local status_str = is_all_passed and "[✓ 全部通过]" or
+        string.format("[x 存在失败 (%d 项未通过)]", self.test_count - self.success_count)
+        print(string.format("=== %s 测试汇总: %s (%d/%d) ===\n", self.name, status_str, self.success_count, self.test_count))
     end
 
     return suite
