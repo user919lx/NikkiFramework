@@ -136,7 +136,7 @@ function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigge
     local cost = ctx.cost or def.cost
     local amount
     if cost and cost.amount and cost.amount > 0 and not is_toggling_off then
-        local current_val = ResourceAdapter.GetCurrent(inst, cost.resource)
+        local current_val = ResourceAdapter.GetCurrent(inst, cost.res)
         if current_val < cost.amount then
             return false, "NOT_ENOUGH_RESOURCE"
         end
@@ -167,8 +167,8 @@ function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigge
     -- ====================================================
     -- 结算阶段 (瞬间离散扣费，只传 inst, resource_name, delta)
     -- ====================================================
-    if amount and cost and cost.resource then
-        ResourceAdapter.DoDelta(inst, cost.resource, -amount)
+    if amount and cost and cost.res then
+        ResourceAdapter.DoDelta(inst, cost.res, -amount)
     end
 
     return true
