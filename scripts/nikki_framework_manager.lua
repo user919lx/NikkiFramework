@@ -234,8 +234,11 @@ function NikkiFrameworkManager.Init(config, mod_env)
         -- 向 Adapter 注册 Config 里自定义的 resources
         if profile_data.custom_resources then
             for res_id, config_data in pairs(profile_data.custom_resources) do
-                if config_data.component then
-                    ResourceAdapter.RegisterStrategy(res_id, config_data.component)
+                ResourceAdapter.RegisterStrategy(res_id, config_data)
+                if config_data.ui and config_data.component and config_data.component.name then
+                    log.debug("[NikkiFramework] Auto-adding replicable component: '%s' for resource '%s'",
+                    config_data.component.name, res_id)
+                    mod_env.AddReplicableComponent(config_data.component.name)
                 end
             end
         end
@@ -245,6 +248,8 @@ function NikkiFrameworkManager.Init(config, mod_env)
                 ResolverRegistry.Register(prefab_name, profile_resolvers)
 
                 mod_env.AddPrefabPostInit(prefab_name, function(inst)
+                    inst:AddTag("nikki_framework")
+
                     if not TheWorld.ismastersim then return end
 
                     -- 1. 挂载框架核心四件套

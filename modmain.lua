@@ -43,6 +43,18 @@ if not GLOBAL.TheNet:IsDedicated() then
             player.replica.nikki_skill_trigger:CastKey(key)
         end
     end)
+
+    local BADGE_SPACING = 62 -- 与 Combined Status 三围徽章间距一致
+    local function AddExtraStatusWidget(self)
+        if self.owner and self.owner:HasTag("nikki_framework") then
+            local sx, sy = self.stomach:GetPositionXYZ()
+            local dir = sx < 0 and -1 or 1
+            local NikkiPanel = require("widgets/nikki_panel")
+            self.nikki_panel = self:AddChild(NikkiPanel(self.owner, dir, BADGE_SPACING))
+            self.nikki_panel:SetPosition(sx + dir * BADGE_SPACING, sy, 0)
+        end
+    end
+    AddClassPostConstruct("widgets/statusdisplays", AddExtraStatusWidget)
 end
 
 if not is_debug_mode then
