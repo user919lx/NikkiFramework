@@ -4,6 +4,8 @@ local EffectResolver = require("resolvers/effect_resolver")
 local SkillResolver = require("resolvers/skill_resolver")
 local StateResolver = require("resolvers/state_resolver")
 local ResolverRegistry = require("nikki_resolver_registry")
+local ModifierAdapter = require("utils/modifier_adapter")
+local ResourceAdapter = require("utils/resource_adapter")
 
 -- ========================================================
 -- 调试打印工具 (改造为字符串拼接模式，交由 log 系统输出)
@@ -195,7 +197,6 @@ function NikkiFrameworkManager.Init(config, mod_env)
         local profile_resolvers = {}
         local raw_skill_data, raw_state_data = nil, nil
 
-        -- 读取 config 配置
         local basic_state = profile_data.basic_state or "basic"
         local default_state = profile_data.default_state or "default"
 
@@ -218,36 +219,65 @@ function NikkiFrameworkManager.Init(config, mod_env)
         if profile_data.state then
             raw_state_data = require(profile_data.state)
             if raw_state_data then
-                -- 传入动态 basic_state 名字
                 PrecompileStates(raw_state_data, raw_skill_data, basic_state)
                 profile_resolvers.state = StateResolver(raw_state_data)
-
                 for state_name, state_def in pairs(raw_state_data) do
                     if state_name ~= basic_state and state_def.compiled_triggers and state_def.compiled_triggers.actions then
                         for action_id, _ in pairs(state_def.compiled_triggers.actions) do HookActionForSkill(action_id) end
                     end
                 end
                 log.debug("[NikkiFramework] StateResolver initialized for profile '%s' with default state '%s'",
-                profile_name, default_state)
+                    profile_name, default_state)
+            end
+        end
+
+        -- 向 Adapter 注册 Config 里自定义的 resources
+        if profile_data.custom_resources then
+            for res_id, config_data in pairs(profile_data.custom_resources) do
+                if config_data.component then
+                    ResourceAdapter.RegisterStrategy(res_id, config_data.component)
+                end
             end
         end
 
         if profile_data.prefabs and type(profile_data.prefabs) == "table" then
             for _, prefab_name in ipairs(profile_data.prefabs) do
                 ResolverRegistry.Register(prefab_name, profile_resolvers)
+
                 mod_env.AddPrefabPostInit(prefab_name, function(inst)
                     if not TheWorld.ismastersim then return end
+
+                    -- 1. 挂载框架核心四件套
                     local core_components = { "nikki_skill", "nikki_skill_trigger", "nikki_state", "nikki_effect" }
                     for _, comp_name in ipairs(core_components) do
                         if not inst.components[comp_name] then inst:AddComponent(comp_name) end
                     end
+
+                    -- 2. 智能检测并挂载开发者注册的 custom_resources
+                    if profile_data.custom_resources then
+                        for res_id, config_data in pairs(profile_data.custom_resources) do
+                            if config_data.component and config_data.component.name then
+                                local c_name = config_data.component.name
+                                -- 验资：如果没有对应的组件，强行补上！
+                                if not inst.components[c_name] then
+                                    inst:AddComponent(c_name)
+                                    log.debug(
+                                        "[NikkiFramework] Auto-added missing custom resource component: '%s' to '%s'",
+                                        c_name,
+                                        tostring(inst))
+                                end
+                            end
+                        end
+                    end
+
+                    -- 3. 将 Resolver 注入给实体身上的组件
                     if profile_resolvers.effect then inst.components.nikki_effect:SetResolver(profile_resolvers.effect) end
                     if profile_resolvers.skill then inst.components.nikki_skill:SetResolver(profile_resolvers.skill) end
                     if profile_resolvers.state then
-                        -- 使用 config 中的 default_state 初始化
                         inst.components.nikki_state:Init(profile_resolvers.state, default_state)
                     end
-                    log.debug("[NikkiFramework] PostInit completed for prefab '%s' with profile '%s'", prefab_name, profile_name)
+                    log.debug("[NikkiFramework] PostInit completed for prefab '%s' with profile '%s'", prefab_name,
+                        profile_name)
                 end)
             end
         end

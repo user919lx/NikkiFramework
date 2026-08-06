@@ -36,8 +36,7 @@ function EffectResolver:OnEffectEnd(inst, id, context)
     if def.tags then for _, tag in ipairs(def.tags) do inst:RemoveTag(tag) end end
     if def.mods then for mod_type, _ in pairs(def.mods) do ModifierAdapter.Remove(inst, mod_type, id) end end
     if def.cost and def.cost.res then
-        local comp = ResourceAdapter.GetComponent(inst, def.cost.res)
-        if comp then ResourceAdapter.RemoveRegen(inst, comp, def.cost.res, "effect_" .. id) end
+        ResourceAdapter.RemoveRegen(inst, def.cost.res, "effect_" .. id)
     end
     if def.on_remove then pcall(def.on_remove, inst, def, context) end
 end
@@ -49,8 +48,7 @@ function EffectResolver:UpdateEffectLayers(inst, id, layers)
         for mod_type, value in pairs(def.mods) do ModifierAdapter.Apply(inst, mod_type, value, id, layers) end
     end
     if def.cost and def.cost.res and def.cost.rate then
-        local comp = ResourceAdapter.GetComponent(inst, def.cost.res)
-        if comp then ResourceAdapter.AddRegen(inst, comp, def.cost.res, -def.cost.rate * layers, "effect_" .. id) end
+        ResourceAdapter.AddRegen(inst, def.cost.res, -def.cost.rate * layers, "effect_" .. id)
     end
 end
 
