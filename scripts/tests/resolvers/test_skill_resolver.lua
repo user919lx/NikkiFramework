@@ -24,7 +24,7 @@ return function()
 
     local resolver = SkillResolver({
         ["test_toggle"] = {
-            cost = { resource = "sanity", amount = 10 },
+            cost = { res = "sanity", amount = 10 },
             toggle = { "test_buff" }
         }
     })
