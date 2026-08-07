@@ -57,7 +57,7 @@ end)
 function NikkiPanel:UpdateBadges()
     local owner = self.owner
     if not (owner and owner:IsValid() and owner.replica and owner.replica.nikki_state) then return end
-    local raw_res_ids = owner.replica.nikki_state:GetStateBadges()
+    local raw_res_ids = owner.replica.nikki_state:GetBadges()
     local res_ids = {}
 
     if type(raw_res_ids) == "table" then
