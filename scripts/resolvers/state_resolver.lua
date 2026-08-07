@@ -32,23 +32,24 @@ function StateResolver:GetAllStates()
     return self:GetAllDefs()
 end
 
-function StateResolver:GetStateBadges(state)
+function StateResolver:GetBadges(state)
     local def = self:GetStateDef(state)
     return def and def.badges or nil
 end
 
--- 封装：直接返回该形态下绑定在某按键上的所有技能列表
+-- 返回当前形态下拥有的所有技能 ID 列表
+function StateResolver:GetSkills(state_name)
+    local def = self:GetStateDef(state_name)
+    return def and def.skills or {}
+end
+
+-- 返回该形态下绑定在某按键上的所有技能列表
 function StateResolver:GetSkillsForKey(state_name, key_code)
     local def = self:GetStateDef(state_name)
     if def and def.compiled_triggers and def.compiled_triggers.keys then
         return def.compiled_triggers.keys[key_code]
     end
     return nil
-end
-
-function StateResolver:GetWheelSkills(state_name)
-    local def = self:GetStateDef(state_name)
-    return def and def.wheel or {}
 end
 
 return StateResolver

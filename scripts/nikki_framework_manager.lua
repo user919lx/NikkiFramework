@@ -8,12 +8,12 @@ local ModifierAdapter = require("utils/modifier_adapter")
 local ResourceAdapter = require("utils/resource_adapter")
 
 -- ========================================================
--- 调试打印工具 (改造为字符串拼接模式，交由 log 系统输出)
+-- 调试打印工具
 -- ========================================================
 local function FormatTableToString(tab, indent, seen, out)
     indent = indent or 0
     seen = seen or {}
-    out = out or {} -- 字符串数组容器
+    out = out or {}
 
     if type(tab) ~= "table" then
         table.insert(out, string.rep(" ", indent) .. tostring(tab))
@@ -120,7 +120,6 @@ local function ApplyTriggerOverrides(target, source)
     end
 end
 
--- 接收动态的 basic_state_name
 local function PrecompileStates(state_data, skill_data, basic_state_name)
     local basic = state_data[basic_state_name] or {}
 
@@ -129,7 +128,6 @@ local function PrecompileStates(state_data, skill_data, basic_state_name)
             state_def.skills = MergeArrays(basic.skills, state_def.skills)
             state_def.effects = MergeArrays(basic.effects, state_def.effects)
             state_def.tags = MergeArrays(basic.tags, state_def.tags)
-            state_def.wheel = MergeArrays(basic.wheel, state_def.wheel)
 
             local compiled_triggers = { keys = {}, actions = {}, events = {} }
 
@@ -154,7 +152,6 @@ local function PrecompileStates(state_data, skill_data, basic_state_name)
             ApplyTriggerOverrides(compiled_triggers, state_def.triggers)
             state_def.compiled_triggers = compiled_triggers
 
-            -- 编译期输出结果 (完美使用 log.debug 拼接输出)
             local dump_str = DumpTableToLog(compiled_triggers)
             log.debug("\n==================================================\n" ..
                 "[NikkiFramework] Compiled state: '" .. tostring(state_name) .. "'\n" ..
@@ -171,9 +168,8 @@ local function HookActionForSkill(action_id)
     action.fn = function(act)
         local origin_result = old_fn and old_fn(act) or nil
         if act.doer and act.doer.components.nikki_skill_trigger then
-            -- 融合你的完美提议：既保留标准字段，又暴露原始 act
             local params = {
-                act = act, -- 暴露原始动作上下文
+                act = act,
                 target = act.target,
                 pos = type(act.GetActionPoint) == "function" and act:GetActionPoint() or nil,
                 doer = act.doer,
@@ -231,7 +227,6 @@ function NikkiFrameworkManager.Init(config, mod_env)
             end
         end
 
-        -- 向 Adapter 注册 Config 里自定义的 resources
         if profile_data.custom_resources then
             for res_id, config_data in pairs(profile_data.custom_resources) do
                 ResourceAdapter.RegisterStrategy(res_id, config_data)
@@ -258,18 +253,21 @@ function NikkiFrameworkManager.Init(config, mod_env)
 
                     if not TheWorld.ismastersim then return end
 
-                    -- 1. 挂载框架核心四件套
-                    local core_components = { "nikki_skill", "nikki_skill_trigger", "nikki_state", "nikki_effect" }
+                    local core_components = {
+                        "nikki_skill",
+                        "nikki_skill_trigger",
+                        "nikki_state",
+                        "nikki_effect",
+                        "nikki_skillwheel",
+                    }
                     for _, comp_name in ipairs(core_components) do
                         if not inst.components[comp_name] then inst:AddComponent(comp_name) end
                     end
 
-                    -- 2. 智能检测并挂载开发者注册的 custom_resources
                     if profile_data.custom_resources then
                         for res_id, config_data in pairs(profile_data.custom_resources) do
                             if config_data.component and config_data.component.name then
                                 local c_name = config_data.component.name
-                                -- 验资：如果没有对应的组件，强行补上！
                                 if not inst.components[c_name] then
                                     inst:AddComponent(c_name)
                                     log.debug(
@@ -281,7 +279,6 @@ function NikkiFrameworkManager.Init(config, mod_env)
                         end
                     end
 
-                    -- 3. 将 Resolver 注入给实体身上的组件
                     if profile_resolvers.effect then inst.components.nikki_effect:SetResolver(profile_resolvers.effect) end
                     if profile_resolvers.skill then inst.components.nikki_skill:SetResolver(profile_resolvers.skill) end
                     if profile_resolvers.state then

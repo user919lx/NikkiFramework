@@ -88,13 +88,6 @@ function NikkiState:ApplyStateDef(def)
     end
 end
 
--- 提供给轮盘等 UI 组件查询用
-function NikkiState:GetWheelSkills()
-    if not self.resolver or not self.state then return {} end
-    local def = self.resolver:GetStateDef(self.state)
-    return def and def.wheel or {}
-end
-
 -- =========================================================
 --                      查询接口
 -- =========================================================

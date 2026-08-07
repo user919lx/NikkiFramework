@@ -16,8 +16,26 @@ function SkillResolver:GetSkillName(skill_id) return self:GetDef(skill_id) and s
 function SkillResolver:GetSkillRange(skill_id) return self:GetDef(skill_id) and self:GetDef(skill_id).range or nil end
 
 -- ========================================================
--- 新增：纯粹的只读查询接口，不修改任何状态
+-- 纯粹的只读查询接口，不修改任何状态
 -- ========================================================
+
+-- 查询技能轮数据
+function SkillResolver:GetSkillWheel(skill_id)
+    local def = self:GetDef(skill_id)
+    if not def or type(def.wheel) ~= "table" or not def.wheel.ui then
+        return nil
+    end
+
+    -- 封装并只返回 Prefab/UI 关心的轮盘内部结构，隐藏 cost、fn 等核心逻辑
+    return {
+        id = skill_id,
+        name = def.name or skill_id,
+        instant = def.wheel.instant == true, -- 顶层瞬发标志
+        ui = def.wheel.ui,
+        reticule = def.wheel.reticule,
+    }
+end
+
 function SkillResolver:GetSkillCooldown(skill_id, trigger_type, trigger_key)
     local def = self:GetDef(skill_id)
     if not def then return 0 end
@@ -41,6 +59,20 @@ function SkillResolver:OnSkillRemove(inst, skill_id)
     if def and type(def.on_remove) == "function" then pcall(def.on_remove, inst, def) end
 end
 
+function SkillResolver:NeedsServer(skill_id)
+    local def = self:GetDef(skill_id)
+    if def then
+        if def.client_only then return false end
+        if type(def.fn) == "function" then return true end
+    end
+    return false
+end
+
+-- ========================================================
+-- 公共验证引擎 (双端通用)
+-- ========================================================
+
+
 function SkillResolver:ExecuteClientFn(inst, skill_id, params)
     local def = self:GetDef(skill_id)
     if not def then return false, "NOT_FOUND" end
@@ -59,18 +91,6 @@ function SkillResolver:ExecuteClientFn(inst, skill_id, params)
     return true
 end
 
-function SkillResolver:NeedsServer(skill_id)
-    local def = self:GetDef(skill_id)
-    if def then
-        if def.client_only then return false end
-        if type(def.fn) == "function" then return true end
-    end
-    return false
-end
-
--- ========================================================
--- 公共验证引擎 (双端通用)
--- ========================================================
 function SkillResolver:CheckRequiredTags(inst, skill_id, trigger_type, trigger_key)
     local def = self:GetDef(skill_id)
     if not def then return false end
