@@ -15,6 +15,22 @@ function SkillResolver:GetSkillName(skill_id) return self:GetDef(skill_id) and s
 
 function SkillResolver:GetSkillRange(skill_id) return self:GetDef(skill_id) and self:GetDef(skill_id).range or nil end
 
+-- ========================================================
+-- 新增：纯粹的只读查询接口，不修改任何状态
+-- ========================================================
+function SkillResolver:GetSkillCooldown(skill_id, trigger_type, trigger_key)
+    local def = self:GetDef(skill_id)
+    if not def then return 0 end
+
+    local ctx = {}
+    if trigger_type and trigger_key and def.default_triggers and def.default_triggers[trigger_type] then
+        local specific = def.default_triggers[trigger_type][trigger_key]
+        if type(specific) == "table" then ctx = specific end
+    end
+
+    return ctx.cd or def.cd or 0
+end
+
 function SkillResolver:OnSkillAdd(inst, skill_id)
     local def = self:GetDef(skill_id)
     if def and type(def.on_add) == "function" then pcall(def.on_add, inst, def) end
@@ -29,6 +45,7 @@ function SkillResolver:ExecuteClientFn(inst, skill_id, params)
     local def = self:GetDef(skill_id)
     if not def then return false, "NOT_FOUND" end
 
+    -- 这里的拦截也必须交还给客户端负责调用的入口 (不再引入 Component)
     if type(def.client_fn) == "function" then
         local success, result, err = pcall(def.client_fn, inst, params, def)
         if not success then
@@ -79,7 +96,7 @@ function SkillResolver:CheckRequiredTags(inst, skill_id, trigger_type, trigger_k
 end
 
 -- ========================================================
--- 服务端终极执行引擎
+-- 服务端终极执行引擎 (彻底剔除 Component 调用)
 -- ========================================================
 function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigger_key, params)
     local def = self:GetDef(skill_id)
@@ -95,12 +112,9 @@ function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigge
         if type(specific) == "table" then ctx = specific end
     end
 
-    -- ====================================================
-    -- 【核心安全屏障】：互斥裁决，fn 拥有绝对优先权
-    -- ====================================================
     local fn = ctx.fn or def.fn
 
-    -- 验资阶段 (技能施放瞬间的离散消耗，如技能本身的手续费)
+    -- 验资阶段 (技能施放瞬间的离散消耗)
     local cost = ctx.cost or def.cost
     local amount = (cost and cost.amount and cost.amount > 0) and cost.amount or nil
     if amount then
