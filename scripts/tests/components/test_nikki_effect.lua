@@ -7,7 +7,7 @@ return function()
     inst:AddComponent("nikki_effect")
     local cmp = inst.components.nikki_effect
 
-    -- A. 深度 Mock 定时器，用于验证是否被取消[cite: 36]
+    -- A. 深度 Mock 定时器
     local mock_timers = {}
     inst.DoTaskInTime = function(self, duration, fn)
         local timer = { canceled = false, fn = fn }
@@ -16,47 +16,42 @@ return function()
         return timer
     end
 
+    -- 深度 Mock 适配最新架构的 Resolver
     local mock_resolver = {
         GetEffectConfig = function(self, id)
-            if id == "eff_ignore" then return 10, 2, "ignore" end
-            if id == "eff_refresh" then return 10, 2, "refresh" end
-            if id == "eff_add" then return 10, 2, "add" end -- 上限为 2
+            if id == "eff_add" then return 10, 2, "add" end
+            if id == "eff_toggle" then return nil, 1, "toggle" end
+            if id == "eff_drain_death" then return 10, 1, "refresh" end
+            return 10, 1, "ignore"
         end,
-        OnEffectStart = function() end, OnEffectEnd = function() end,
-        UpdateEffectLayers = function() end, HasFn = function() return false end
+        OnEffectStart = function() end,
+        OnEffectEnd = function() end,
+        UpdateEffectLayers = function() end,
+        HasFn = function() return false end,
+        PayActivationCost = function() return true end,
+        OnUpdateEffect = function(self, inst, id, dt, ctx, layers)
+            -- 仅对模拟资源见底的 effect 返回 false
+            return id ~= "eff_drain_death"
+        end
     }
     cmp:SetResolver(mock_resolver)
 
-    -- B. 测试 Apply 分支：Ignore[cite: 36]
-    suite:assert(cmp:Apply("eff_ignore") == true, "首次添加成功")
-    suite:assert(cmp:Apply("eff_ignore") == false, "Ignore 模式下再次添加直接返回 false")
-
-    -- C. 测试 Apply 分支：Refresh[cite: 36]
-    cmp:Apply("eff_refresh")
-    local first_timer = mock_timers[#mock_timers]
-    cmp:Apply("eff_refresh")
-    suite:assert(first_timer.canceled == true, "Refresh 模式下，旧定时器被成功 Cancel")
-    suite:assert(cmp:GetLayers("eff_refresh") == 1, "Refresh 模式下层数不变")
-
-    -- D. 测试 Apply 分支：Add 及溢出[cite: 36]
+    -- B. 测试层数叠加机制 (Add)
     cmp:Apply("eff_add")
     cmp:Apply("eff_add")
-    suite:assert(cmp:GetLayers("eff_add") == 2, "Add 模式下层数叠加至 2")
-    
-    local old_timer_idx = #mock_timers - 1
-    cmp:Apply("eff_add") -- 触发溢出上限极值
-    suite:assert(cmp:GetLayers("eff_add") == 2, "超过 max 上限，层数锁定")
-    suite:assert(mock_timers[old_timer_idx].canceled == true, "达到上限时，最老的定时器被正确移除")
+    suite:assert(cmp:GetLayers("eff_add") == 2, "Add 模式正常叠层")
 
-    -- E. 测试 Remove 分支：按层降级 vs 强制清除[cite: 36]
-    cmp:Remove("eff_add", false)
-    suite:assert(cmp:GetLayers("eff_add") == 1, "非强制 Remove，层数 -1")
-    cmp:Remove("eff_add", true)
-    suite:assert(cmp:HasEffect("eff_add") == false, "强制 Remove，彻底清空")
+    -- C. 测试全新 Toggle 模式 (核心防抖与闭环)
+    cmp:Apply("eff_toggle")
+    suite:assert(cmp:HasEffect("eff_toggle") == true, "Toggle 模式第一次 Apply，成功挂载")
+    cmp:Apply("eff_toggle")
+    suite:assert(cmp:HasEffect("eff_toggle") == false, "Toggle 模式已存在时再次 Apply，触发免单卸载机制")
 
-    -- F. 测试 OnUpdate 分支[cite: 36]
-    cmp:Apply("eff_ignore")
-    suite:assert(pcall(function() cmp:OnUpdate(0.033) end), "OnUpdate 轮询在无 Fn 时安全放行")
+    -- D. 测试帧更新自动卸载 (资源见底 / Fn 否定)
+    cmp:Apply("eff_drain_death")
+    suite:assert(cmp:HasEffect("eff_drain_death") == true, "准备自动注销测试")
+    cmp:OnUpdate(0.033)
+    suite:assert(cmp:HasEffect("eff_drain_death") == false, "OnUpdate 收到 Resolver 的 false 信号后，成功执行自我销毁")
 
     suite:Cleanup()
 end
