@@ -52,8 +52,13 @@ function NikkiEffect:Apply(id, source)
     local duration, max, mode = self.resolver:GetEffectConfig(id)
     local active = self._active_effects[id]
 
-    -- 情况 A：首次挂载
+    -- 情况 A：首次挂载 (从 0 到 1，需要支付启动成本)
     if not active then
+        -- 【激活验资】：检查并扣除单次启动费用 (cost)
+        if not self.resolver:PayActivationCost(self.inst, id) then
+            return false
+        end
+
         self._active_effects[id] = {
             layers = 1,
             timers = {},
@@ -83,8 +88,12 @@ function NikkiEffect:Apply(id, source)
         return true
     end
 
-    -- 情况 B：已经存在，处理叠加规则
-    if mode == "ignore" then
+    -- 情况 B：已经存在，处理叠加与开关规则 (从 1 往后走，跳过启动成本)
+    if mode == "toggle" then
+        -- 【开关模式】：二次 Apply 触发直接关闭 (免单卸载)
+        self:Remove(id, true)
+        return true
+    elseif mode == "ignore" then
         log.debug("[NikkiEffect] Effect %s is already active on %s, ignoring new application.", tostring(id),
             tostring(self.inst))
         return false
@@ -181,7 +190,7 @@ function NikkiEffect:Clear()
 end
 
 -- ============================================
--- 帧更新：只处理业务 Tick
+-- 帧更新：处理业务 Tick 与持续扣费卸载
 -- ============================================
 function NikkiEffect:OnUpdate(dt)
     if not self.resolver then return end
@@ -192,8 +201,10 @@ function NikkiEffect:OnUpdate(dt)
     end
 
     for id, active in pairs(self._active_effects) do
-        if self.resolver:HasFn(id) then
-            self.resolver:ExecuteFn(self.inst, id, dt, active.context)
+        -- 交由 Resolver 处理周期性消耗/回复 (drain) 与 fn，返回 false 时触发自我卸载
+        local should_keep = self.resolver:OnUpdateEffect(self.inst, id, dt, active.context, active.layers)
+        if not should_keep then
+            self:Remove(id, true)
         end
     end
 end

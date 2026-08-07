@@ -46,7 +46,7 @@ function SkillResolver:NeedsServer(skill_id)
     local def = self:GetDef(skill_id)
     if def then
         if def.client_only then return false end
-        if type(def.fn) == "function" or def.toggle then return true end
+        if type(def.fn) == "function" then return true end
     end
     return false
 end
@@ -99,53 +99,18 @@ function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigge
     -- 【核心安全屏障】：互斥裁决，fn 拥有绝对优先权
     -- ====================================================
     local fn = ctx.fn or def.fn
-    local toggle_data = nil
-    if not fn then
-        toggle_data = ctx.toggle or def.toggle
-    end
 
-    local toggle_list = nil
-    if type(toggle_data) == "string" then
-        toggle_list = { toggle_data }
-    elseif type(toggle_data) == "table" then
-        toggle_list = toggle_data
-    end
-
-    -- ====================================================
-    -- 生命周期智能判定 (支持复数 Effect)
-    -- ====================================================
-    local is_toggling_off = false
-    if toggle_list and inst.components.nikki_effect then
-        for _, eff in ipairs(toggle_list) do
-            if not inst.components.nikki_effect:IsPermanent(eff) then
-                log.error(
-                    "[SkillResolver] Configuration error: Toggle skill '%s' is bound to effect '%s' with a duration. Toggle skills can only use permanent effects.",
-                    skill_id, eff)
-                return false, "INVALID_TOGGLE_EFFECT"
-            end
-            if inst.components.nikki_effect:HasEffect(eff) then
-                is_toggling_off = true
-                break
-            end
-        end
-    end
-
-    -- ====================================================
-    -- 验资阶段 (纯粹询问 Adapter，不再直接持有 comp)
-    -- ====================================================
+    -- 验资阶段 (技能施放瞬间的离散消耗，如技能本身的手续费)
     local cost = ctx.cost or def.cost
-    local amount
-    if cost and cost.amount and cost.amount > 0 and not is_toggling_off then
+    local amount = (cost and cost.amount and cost.amount > 0) and cost.amount or nil
+    if amount then
         local current_val = ResourceAdapter.GetCurrent(inst, cost.res)
-        if current_val < cost.amount then
+        if current_val < amount then
             return false, "NOT_ENOUGH_RESOURCE"
         end
-        amount = cost.amount
     end
 
-    -- ====================================================
-    -- 互斥执行阶段
-    -- ====================================================
+    -- 执行阶段
     if fn then
         local success, result, err = pcall(fn, inst, params, def)
         if not success then
@@ -154,19 +119,9 @@ function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigge
         elseif result == false then
             return false, err or "EXECUTION_REJECTED"
         end
-    elseif toggle_list and inst.components.nikki_effect then
-        for _, eff in ipairs(toggle_list) do
-            if is_toggling_off then
-                inst.components.nikki_effect:Remove(eff, true)
-            else
-                inst.components.nikki_effect:Apply(eff, inst)
-            end
-        end
     end
 
-    -- ====================================================
-    -- 结算阶段 (瞬间离散扣费，只传 inst, resource_name, delta)
-    -- ====================================================
+    -- 结算扣费
     if amount and cost and cost.res then
         ResourceAdapter.DoDelta(inst, cost.res, -amount)
     end

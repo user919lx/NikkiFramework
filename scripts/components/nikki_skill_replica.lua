@@ -69,7 +69,7 @@ function NikkiSkill:CastSkill(skill_id, params)
     local should_proceed, err = resolvers.skill:ExecuteClientFn(self.inst, skill_id, params)
 
     -- 【3. 客机决断】：如果 client_fn 判定失败（return false），直接拦截发包
-    if not should_proceed then
+    if should_proceed == false then
         log.debug("[NikkiSkill] UI CastSkill rejected by client_fn '%s'. Reason: %s", skill_id, tostring(err))
         return
     end
