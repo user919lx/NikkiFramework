@@ -237,7 +237,7 @@ function NikkiFrameworkManager.Init(config, mod_env)
                 ResourceAdapter.RegisterStrategy(res_id, config_data)
                 if config_data.ui and config_data.component and config_data.component.name then
                     log.debug("[NikkiFramework] Auto-adding replicable component: '%s' for resource '%s'",
-                    config_data.component.name, res_id)
+                        config_data.component.name, res_id)
                     mod_env.AddReplicableComponent(config_data.component.name)
                 end
             end
@@ -249,6 +249,12 @@ function NikkiFrameworkManager.Init(config, mod_env)
 
                 mod_env.AddPrefabPostInit(prefab_name, function(inst)
                     inst:AddTag("nikki_framework")
+                    inst:DoTaskInTime(0, function()
+                        if not TheNet:IsDedicated() and inst == ThePlayer then
+                            local indicator = SpawnPrefab("nikki_range_indicator")
+                            indicator:Attach(inst)
+                        end
+                    end)
 
                     if not TheWorld.ismastersim then return end
 

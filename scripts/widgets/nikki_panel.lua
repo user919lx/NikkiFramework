@@ -1,9 +1,8 @@
--- widgets/nikki_panel.lua
+-- scripts/widgets/nikki_panel.lua
 local Widget = require "widgets/widget"
 local NikkiBadge = require "widgets/nikki_badge"
 local TEMPLATES = require "widgets/redux/templates"
 local NikkiClientSettings = require "nikki_client_settings"
-
 
 local function PushIndicatorEvent(owner, new_state)
     if not (owner and owner:IsValid()) then
@@ -13,22 +12,23 @@ local function PushIndicatorEvent(owner, new_state)
     owner:PushEvent("skill_range_toggle_changed", { new_state = new_state })
     print(string.format("[NikkiPanel] PushIndicatorEvent: new_state=%s", tostring(new_state)))
 end
+
 local NikkiPanel = Class(Widget, function(self, owner, dir, spacing)
     Widget._ctor(self, "NikkiPanel")
     self.owner = owner
 
-    -- 直接在初始化时绑定布局参数
     self.dir = dir or -1
     self.spacing = spacing or 62
 
     self.badge_pool = {}
 
-    -- 射程切换按钮
-    local init_checked = NikkiClientSettings.GetShowRange()
+    -- 从通用配置接口读取
+    local init_checked = NikkiClientSettings.Get("show_range")
 
     self.range_btn = self:AddChild(TEMPLATES.StandardCheckbox(
         function()
-            local new_state = NikkiClientSettings.ToggleShowRange()
+            -- 使用通用 Toggle 接口进行反转和落盘
+            local new_state = NikkiClientSettings.Toggle("show_range")
             PushIndicatorEvent(owner, new_state)
             return new_state
         end,
@@ -40,17 +40,13 @@ local NikkiPanel = Class(Widget, function(self, owner, dir, spacing)
 
     if owner and owner:IsValid() then
         self.inst:DoTaskInTime(FRAMES, function()
-            -- 初始化排列
             self:UpdateBadges()
-            -- 初始化时同步状态
-            PushIndicatorEvent(owner, init_checked)
-            -- 初始化射程按钮显示状态
             self:UpdateRangeButtonVisibility()
-            -- 监听形态改变事件
+
             self.inst:ListenForEvent("nikki_state_dirty", function()
                 self:UpdateBadges()
             end, owner)
-            -- 监听射程更新事件
+
             self.inst:ListenForEvent("skill_max_range_dirty", function()
                 self:UpdateRangeButtonVisibility()
             end, owner)
@@ -58,7 +54,6 @@ local NikkiPanel = Class(Widget, function(self, owner, dir, spacing)
     end
 end)
 
--- 核心方法：动态更新与排列 Badges
 function NikkiPanel:UpdateBadges()
     local owner = self.owner
     if not (owner and owner:IsValid() and owner.replica and owner.replica.nikki_state) then return end
@@ -96,7 +91,7 @@ end
 function NikkiPanel:UpdateRangeButtonVisibility()
     local owner = self.owner
     local range = (owner and owner.replica.nikki_skill and owner.replica.nikki_skill:GetMaxRange() or 0)
-    -- 当存在有效射程 (>0) 时显示开关控件，无射程时自动隐藏
+
     if range > 0 then
         print(string.format("[NikkiPanel] UpdateRangeButtonVisibility: radius=%d, showing range button", range))
         self.range_btn:Show()

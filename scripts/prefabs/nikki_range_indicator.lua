@@ -1,4 +1,7 @@
+-- scripts/prefabs/nikki_range_indicator.lua
 local log = require("utils/log")
+local NikkiClientSettings = require("nikki_client_settings")
+
 local TEXTURE_SIZE = 1900
 local assets = {
     Asset("ANIM", "anim/firefighter_placement.zip"),
@@ -39,7 +42,6 @@ local function SetRange(inst, range)
         ApplyScale(inst)
     end
 
-    -- 每次射程改变，重新评估显隐状态
     UpdateVisibility(inst)
 end
 
@@ -49,8 +51,10 @@ local function Attach(inst, owner)
         inst.entity:SetParent(owner.entity)
 
         -- ==========================================================
-        -- 事件管控 1：纯粹的显隐开关监听 (接收包含 new_state 的 payload)
+        -- 初始化：使用通用 API 传入 "show_range" 读取
         -- ==========================================================
+        inst._is_toggled_on = NikkiClientSettings.Get("show_range")
+
         inst:ListenForEvent("skill_range_toggle_changed", function(owner_inst, data)
             if data ~= nil and data.new_state ~= nil then
                 log.debug("[Nikki Range Indicator] Received toggle event: new_state = %s", tostring(data.new_state))
@@ -59,18 +63,12 @@ local function Attach(inst, owner)
             end
         end, owner)
 
-        -- ==========================================================
-        -- 事件管控 2：纯粹的射程数值更新监听 (接收 max_range 的 payload)
-        -- ==========================================================
         inst:ListenForEvent("skill_max_range_dirty", function(owner_inst, data)
             if data ~= nil and data.max_range ~= nil then
                 SetRange(inst, data.max_range)
             end
         end, owner)
 
-        -- ==========================================================
-        -- 初始状态拉取：仅同步当前射程大小
-        -- ==========================================================
         if owner.replica.nikki_skill then
             SetRange(inst, owner.replica.nikki_skill:GetMaxRange() or 0)
         end
@@ -104,8 +102,7 @@ local function fn()
 
     inst.owner = nil
     inst._range = 0
-    -- 内部变量：记录当前 UI 的开关状态
-    inst._is_toggled_on = false
+    inst._is_toggled_on = false 
 
     inst.SetRange = SetRange
     inst.Attach = Attach
