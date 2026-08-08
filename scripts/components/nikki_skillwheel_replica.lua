@@ -1,5 +1,6 @@
 -- scripts/components/nikki_skillwheel_replica.lua
 local ResolverRegistry = require("nikki_resolver_registry")
+local ResourceAdapter = require("utils/resource_adapter")
 local log = require("utils/log")
 
 local ANIM_TAGS = {
@@ -8,7 +9,6 @@ local ANIM_TAGS = {
     "superjump", "parryweapon", "blowdart", "throw_line"
 }
 
--- 保持原汁原味的查询函数供 execute 和 onselect 闭包内部使用
 local function GetCasterOwner(inst)
     local parent = inst.entity:GetParent()
     if parent and parent:IsValid() then return parent end
@@ -22,9 +22,6 @@ local NikkiSkillWheel = Class(function(self, inst)
     self.inst = inst
 end)
 
--- ==========================================================
--- 查询接口：供 spell_caster 提取动态组装的轮盘数据
--- ==========================================================
 function NikkiSkillWheel:GetWheelItems()
     local user = self.inst
     local resolvers = ResolverRegistry.Get(user.prefab)
@@ -40,9 +37,7 @@ function NikkiSkillWheel:GetWheelItems()
 
     for _, skill_id in ipairs(target_skill_ids) do
         local wheel_data = resolvers.skill:GetSkillWheel(skill_id)
-        -- 1. 只有配置了 wheel (包含 ui) 的技能才有资格上轮盘
         if wheel_data then
-            -- 2. 动态标签二次过滤防线
             local can_show = resolvers.skill:CheckRequiredTags(user, skill_id, nil, nil)
             if can_show then
                 local ui_def = wheel_data.ui
@@ -51,7 +46,17 @@ function NikkiSkillWheel:GetWheelItems()
                 local is_aoe = (reticule_def ~= nil)
                 local is_instant = (wheel_data.instant == true)
 
-                -- 组装基础渲染参数
+                -- ===================================================
+                -- 自动装配：自动对接官方 CD 查表
+                -- ===================================================
+                local checkcooldown_fn = ui_def.checkcooldown or function(owner)
+                    -- 使用官方组件进行 CD UI 百分比读取 (Client Safe)
+                    if owner and owner.components.spellbookcooldowns then
+                        return owner.components.spellbookcooldowns:GetSpellCooldownPercent(skill_id)
+                    end
+                    return nil
+                end
+
                 local item = {
                     label = wheel_data.name,
                     id = wheel_data.id,
@@ -60,16 +65,17 @@ function NikkiSkillWheel:GetWheelItems()
                     bank = ui_def.bank,
                     build = ui_def.build,
                     anims = ui_def.anims,
+
+                    checkcooldown = checkcooldown_fn,
                     checkenabled = ui_def.checkenabled,
-                    checkcooldown = ui_def.checkcooldown,
-                    cooldowncolor = ui_def.cooldowncolor or (ui_def.checkcooldown and { 0.65, 0.65, 0.65, 0.75 } or nil),
+                    cooldowncolor = ui_def.cooldowncolor or { 0.65, 0.65, 0.65, 0.75 },
+
                     widget_scale = ui_def.widget_scale or 0.6,
                     hit_radius = (ui_def.anims == nil) and (ui_def.hit_radius or 50) or nil,
                     order = order,
                 }
                 order = order + 1
 
-                -- 客户端路由
                 item.execute = function(spell_inst)
                     local doer = GetCasterOwner(spell_inst)
                     if not doer then return end
@@ -89,7 +95,6 @@ function NikkiSkillWheel:GetWheelItems()
                     end
                 end
 
-                -- 服务端/客户端选择回调
                 item.onselect = function(spell_inst)
                     for _, tag in ipairs(ANIM_TAGS) do
                         spell_inst:RemoveTag(tag)
@@ -151,24 +156,19 @@ function NikkiSkillWheel:GetWheelItems()
 
                 table.insert(items, item)
             end
-            log.debug("[NikkiSkillWheel] GetWheelItems skill_id: %s, user: %s, can_show: %s", tostring(skill_id),
-                tostring(user), tostring(can_show))
         end
     end
     return items
 end
 
--- 打开轮盘
 function NikkiSkillWheel:OpenWheel()
     local inst = self.inst
     if inst.components.nikki_skillwheel then
         inst.components.nikki_skillwheel:OpenWheel()
-        log.debug("[NikkiSkillWheel] OpenWheel called for %s", tostring(inst))
     else
         local caster = inst.spell_caster
         if caster and caster.components.spellbook then
             caster.components.spellbook:OpenSpellBook(inst)
-            log.debug("[NikkiSkillWheel] OpenWheel called for %s", tostring(inst))
         end
     end
     return false

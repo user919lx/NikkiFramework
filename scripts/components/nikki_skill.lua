@@ -64,7 +64,8 @@ function NikkiSkill:GetCooldown(skill_id)
     if not expire_time then return 0 end
 
     local remain = expire_time - GetTime()
-    log.debug("[NikkiSkill] GetCooldown for skill '%s': remain=%.2f (expire_time=%.2f, current_time=%.2f)", skill_id, remain, expire_time, GetTime())
+    log.debug("[NikkiSkill] GetCooldown for skill '%s': remain=%.2f (expire_time=%.2f, current_time=%.2f)", skill_id,
+        remain, expire_time, GetTime())
     if remain <= 0 then
         self._cooldowns[skill_id] = nil
         return 0
@@ -79,6 +80,11 @@ end
 function NikkiSkill:StartCooldown(skill_id, cd_time)
     if cd_time and cd_time > 0 then
         self._cooldowns[skill_id] = GetTime() + cd_time
+
+        -- 巧妙借用官方组件：下发隐形实体同步 UI
+        if self.inst.components.spellbookcooldowns then
+            self.inst.components.spellbookcooldowns:RestartSpellCooldown(skill_id, cd_time)
+        end
     end
 end
 
