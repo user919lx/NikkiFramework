@@ -31,8 +31,8 @@ return function()
     suite:assert(keys_dict["UNKNOWN_KEY"] ~= nil, "无法找到匹配宏的字符串，原样保留作为防呆设计")
 
     -- D. 测试便捷提取 API
-    local badges = resolver:GetStateBadges("state_battle")
-    suite:assert(badges[1] == "atk_up", "GetStateBadges 提取正常")
+    local badges = resolver:GetBadges("state_battle")
+    suite:assert(badges[1] == "atk_up", "GetBadges 提取正常")
 
     local wheel = resolver:GetWheelSkills("state_battle")
     suite:assert(wheel[2] == "skill_2", "GetWheelSkills 提取正常")
