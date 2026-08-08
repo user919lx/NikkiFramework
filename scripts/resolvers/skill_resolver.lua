@@ -3,10 +3,19 @@ local BaseResolver = require("resolvers/base_resolver")
 local log = require("utils/log")
 local ResourceAdapter = require("utils/resource_adapter")
 
-local ANIM_TAGS = {
-    "book", "willow_ember", "remotecontrol", "abigail_flower",
-    "slingshot", "aoeweapon_lunge", "aoeweapon_leap",
-    "superjump", "parryweapon", "blowdart", "throw_line"
+local SG_STATE_MAP = {
+    ["book"] = { "book" },
+    ["castspellmind"] = { "willow_ember" },
+    ["remotecast_pre"] = { "remotecontrol" },
+    ["commune_with_abigail"] = { "abigail_flower" },
+    ["slingshot_special"] = { "slingshot" },
+    ["combat_lunge_start"] = { "aoeweapon_lunge" },
+    ["combat_leap_start"] = { "aoeweapon_leap" },
+    ["combat_superjump_start"] = { "aoeweapon_leap", "superjump" },
+    ["parry_pre"] = { "parryweapon" },
+    ["blowdart_special"] = { "blowdart" },
+    ["throw_line"] = { "throw_line" },
+    ["castspell"] = {},
 }
 
 local function GetCasterOwner(inst)
@@ -24,7 +33,7 @@ local SkillResolver = Class(BaseResolver, function(self, defs)
 end)
 
 -- ========================================================
--- 预编译：启动时完成 ui.anim / ui.image 解析与闭包固化
+-- 预编译：规范化语义分离与闭包固化
 -- ========================================================
 function SkillResolver:_PrecompileWheelDefs(defs)
     self.compiled_wheels = {}
@@ -33,34 +42,33 @@ function SkillResolver:_PrecompileWheelDefs(defs)
         if type(def.wheel) == "table" and type(def.wheel.ui) == "table" then
             local w_def = def.wheel
             local ui = w_def.ui
+            local aoe = w_def.aoe or {}
 
-            -- 1. 结构判定：支持分支结构 ui.anim / ui.image，同时向下兼容旧平铺写法
+            -- 1. 结构判定
             local anim_cfg = ui.anim or (ui.bank and ui)
             local image_cfg = ui.image or (ui.atlas and ui)
-
             local is_anim = anim_cfg ~= nil and (anim_cfg.bank or anim_cfg.build or anim_cfg.anims)
 
-            -- 2. 闭包固化：根据类型固化 checkcooldown 与 checkenabled
+            -- 2. 闭包固化
             local checkcooldown_fn = nil
-            local checkenabled_fn = ui.checkenabled
+            local checkenabled_fn = nil
 
             if is_anim then
-                -- Anim 模式：对接到官方组件读取转圈 CD 百分比
+                -- Anim 模式：强制统一读取官方组件百分比
                 checkcooldown_fn = function(owner)
                     if owner and owner.components.spellbookcooldowns then
                         return owner.components.spellbookcooldowns:GetSpellCooldownPercent(skill_id)
                     end
                     return nil
                 end
+                checkenabled_fn = ui.checkenabled
             else
-                -- Image 模式：没有转圈动画，将 CD 状态转化为 checkenabled = false (触发 ImageButton 原生变灰滤镜)
+                -- Image 模式：强制统一将 CD 状态转化为禁用变灰
                 local user_checkenabled = ui.checkenabled
                 checkenabled_fn = function(owner)
-                    -- 第一关：检查是否在 CD 中，在 CD 直接变灰禁用
                     if owner and owner.components.spellbookcooldowns and owner.components.spellbookcooldowns:IsInCooldown(skill_id) then
                         return false
                     end
-                    -- 第二关：执行开发者自定义的可用性检查
                     if user_checkenabled then
                         return user_checkenabled(owner)
                     end
@@ -72,30 +80,40 @@ function SkillResolver:_PrecompileWheelDefs(defs)
             self.compiled_wheels[skill_id] = {
                 id = skill_id,
                 name = def.name or skill_id,
+
+                -- [顶层控制]
                 instant = w_def.instant == true,
+
+                -- [UI 渲染]
                 is_anim = is_anim,
                 anim_cfg = is_anim and anim_cfg or nil,
                 image_cfg = (not is_anim) and image_cfg or nil,
-                reticule = w_def.reticule,
                 checkcooldown = checkcooldown_fn,
                 checkenabled = checkenabled_fn,
                 widget_scale = ui.widget_scale or 0.6,
                 hit_radius = ui.hit_radius or (not is_anim and 50 or nil),
-                anim_tag = ui.anim_tag,
-                spell_action = ui.spell_action,
-                allow_water = ui.allow_water,
-                deploy_radius = ui.deploy_radius,
-                should_repeat_cast_fn = ui.should_repeat_cast_fn,
-                target_fx = ui.target_fx,
+                clicksound = ui.clicksound,
+                spacer = ui.spacer,
+                nestedwheel = ui.nestedwheel,
+                helptext = ui.helptext,
+
+                -- [AOE 与 瞄准层]
+                aoe = aoe,
+                state = aoe.state,
+                allow_water = aoe.allow_water,
+                deploy_radius = aoe.deploy_radius,
+                target_fx = aoe.target_fx,
+                should_repeat_cast_fn = aoe.should_repeat_cast_fn,
+                reticule = aoe.reticule, -- 【核心修复】：干净的原生底层注入口
             }
         end
     end
 end
 
--- 判断某个技能是否配置了轮盘参数
 function SkillResolver:IsWheelSkill(skill_id)
     return self.compiled_wheels ~= nil and self.compiled_wheels[skill_id] ~= nil
 end
+
 -- ========================================================
 -- 工厂接口：传入上下文参数，生产组装好的 Item 对象
 -- ========================================================
@@ -103,10 +121,9 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
     local compiled = self.compiled_wheels and self.compiled_wheels[skill_id]
     if not compiled then return nil end
 
-    local is_aoe = (compiled.reticule ~= nil)
+    local is_aoe = (compiled.aoe ~= nil and next(compiled.aoe) ~= nil)
     local is_instant = compiled.instant
 
-    -- 基础结构构建
     local item = {
         label = compiled.name,
         id = skill_id,
@@ -114,10 +131,13 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
         checkcooldown = compiled.checkcooldown,
         widget_scale = compiled.widget_scale,
         hit_radius = compiled.hit_radius,
+        clicksound = compiled.clicksound,
+        spacer = compiled.spacer,
+        nestedwheel = compiled.nestedwheel,
+        helptext = compiled.helptext,
         order = order or 1,
     }
 
-    -- 材质分支注入 (Anim 优先)
     if compiled.is_anim then
         local a = compiled.anim_cfg
         item.bank = a.bank
@@ -134,14 +154,13 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
         item.selected = img.selected
     end
 
-    -- 动态路由闭包绑装
-    item.execute = function(spell_inst)
-        local doer = GetCasterOwner(spell_inst)
+    item.execute = function(spell_caster)
+        local doer = GetCasterOwner(spell_caster)
         if not doer then return end
 
         if is_aoe then
             if doer.components.playercontroller then
-                return doer.components.playercontroller:StartAOETargetingUsing(spell_inst)
+                return doer.components.playercontroller:StartAOETargetingUsing(spell_caster)
             end
         elseif is_instant then
             if doer.replica.nikki_skill_trigger then
@@ -149,62 +168,71 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
             end
         else
             if doer.replica.inventory then
-                return doer.replica.inventory:CastSpellBookFromInv(spell_inst)
+                return doer.replica.inventory:CastSpellBookFromInv(spell_caster)
             end
         end
     end
 
-    item.onselect = function(spell_inst)
-        for _, tag in ipairs(ANIM_TAGS) do
-            spell_inst:RemoveTag(tag)
-        end
-        if compiled.anim_tag then
-            spell_inst:AddTag(compiled.anim_tag)
+    item.onselect = function(spell_caster)
+        if spell_caster.components.spellbook then
+            spell_caster.components.spellbook:SetSpellName(item.label)
         end
 
-        if spell_inst.components.spellbook then
-            spell_inst.components.spellbook:SetSpellName(item.label)
-            spell_inst.components.spellbook:SetSpellAction(compiled.spell_action or nil)
-        end
-
-        if is_aoe and spell_inst.components.aoetargeting then
-            spell_inst.components.aoetargeting:SetAllowWater(compiled.allow_water or false)
-            spell_inst.components.aoetargeting:SetDeployRadius(compiled.deploy_radius or 0)
-
-            local reticule = spell_inst.components.aoetargeting.reticule
-            if reticule then
-                reticule.targetfn = nil
-                reticule.mousetargetfn = nil
-                reticule.updatepositionfn = nil
-                reticule.validcolour = { 1, .75, 0, 1 }
-                reticule.invalidcolour = { .5, 0, 0, 1 }
-                reticule.ease = true
-                reticule.mouseenabled = true
-                reticule.twinstickmode = 1
-                reticule.twinstickrange = 8
-
-                if compiled.reticule then
-                    for k, v in pairs(compiled.reticule) do
-                        reticule[k] = v
-                    end
+        if is_aoe then
+            -- 清理旧的动作 Tags
+            for _, tags in pairs(SG_STATE_MAP) do
+                for _, tag in ipairs(tags) do
+                    spell_caster:RemoveTag(tag)
                 end
             end
-            spell_inst.components.aoetargeting:SetShouldRepeatCastFn(compiled.should_repeat_cast_fn)
+            -- 挂载新的动作 Tags
+            if compiled.state and SG_STATE_MAP[compiled.state] then
+                for _, tag in ipairs(SG_STATE_MAP[compiled.state]) do
+                    spell_caster:AddTag(tag)
+                end
+            end
+
+            if spell_caster.components.aoetargeting then
+                spell_caster.components.aoetargeting:SetAllowWater(compiled.allow_water or false)
+                spell_caster.components.aoetargeting:SetDeployRadius(compiled.deploy_radius or 0)
+
+                local native_reticule = spell_caster.components.aoetargeting.reticule
+                if native_reticule then
+                    -- 还原默认参数
+                    native_reticule.targetfn = nil
+                    native_reticule.mousetargetfn = nil
+                    native_reticule.updatepositionfn = nil
+                    native_reticule.validcolour = { 1, .75, 0, 1 }
+                    native_reticule.invalidcolour = { .5, 0, 0, 1 }
+                    native_reticule.ease = true
+                    native_reticule.mouseenabled = true
+                    native_reticule.twinstickmode = 1
+                    native_reticule.twinstickrange = 8
+
+                    -- 【核心修改】：极其优雅地将干净的 reticule 字典全量注入到底层引擎，不再使用丑陋的 if 过滤
+                    if compiled.reticule then
+                        for k, v in pairs(compiled.reticule) do
+                            native_reticule[k] = v
+                        end
+                    end
+                end
+                spell_caster.components.aoetargeting:SetShouldRepeatCastFn(compiled.should_repeat_cast_fn)
+            end
         end
 
         if TheWorld.ismastersim then
             if is_aoe then
-                spell_inst.components.aoetargeting:SetTargetFX(compiled.target_fx or nil)
-                spell_inst.components.spellbook:SetSpellFn(nil)
-                spell_inst.components.aoespell:SetSpellFn(function(caster_inst, doer, pos)
+                spell_caster.components.aoetargeting:SetTargetFX(compiled.target_fx or nil)
+                spell_caster.components.spellbook:SetSpellFn(nil)
+                spell_caster.components.aoespell:SetSpellFn(function(caster_inst, doer, pos)
                     local params = { pos = pos }
                     if doer.components.nikki_skill then
                         return doer.components.nikki_skill:CastSkill(skill_id, params)
                     end
                 end)
             elseif not is_instant then
-                spell_inst.components.aoespell:SetSpellFn(nil)
-                spell_inst.components.spellbook:SetSpellFn(function(caster_inst, doer)
+                spell_caster.components.aoespell:SetSpellFn(nil)
+                spell_caster.components.spellbook:SetSpellFn(function(caster_inst, doer)
                     if doer.components.nikki_skill then
                         return doer.components.nikki_skill:CastSkill(skill_id)
                     end
@@ -220,8 +248,11 @@ end
 -- 基础查询与执行 API
 -- ========================================================
 function SkillResolver:GetSkillDef(id) return self:GetDef(id) end
+
 function SkillResolver:GetAllSkillIds() return self:GetAllIds() end
+
 function SkillResolver:GetSkillName(skill_id) return self:GetDef(skill_id) and self:GetDef(skill_id).name or skill_id end
+
 function SkillResolver:GetSkillRange(skill_id) return self:GetDef(skill_id) and self:GetDef(skill_id).range or nil end
 
 function SkillResolver:GetSkillCooldown(skill_id, trigger_type, trigger_key)
@@ -258,13 +289,10 @@ function SkillResolver:CheckRequiredTags(inst, skill_id, trigger_type, trigger_k
     if req_tags then
         for _, tag in ipairs(req_tags) do
             if not inst:HasTag(tag) then
-                log.debug("[SkillResolver] CheckRequiredTags failed: '%s' is missing required tag '%s' for skill '%s'",
-                    tostring(inst), tag, skill_id)
                 return false
             end
         end
     end
-    log.debug("[SkillResolver] CheckRequiredTags passed for skill '%s' on '%s'", skill_id, tostring(inst))
     return true
 end
 
@@ -312,10 +340,9 @@ function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigge
     end
 
     local fn = ctx.fn or def.fn
-
-    -- 验资阶段 (技能施放瞬间的离散消耗)
     local cost = ctx.cost or def.cost
     local amount = (cost and cost.amount and cost.amount > 0) and cost.amount or nil
+
     if amount then
         local current_val = ResourceAdapter.GetCurrent(inst, cost.res)
         if current_val < amount then
@@ -323,7 +350,6 @@ function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigge
         end
     end
 
-    -- 执行阶段
     if fn then
         local success, result, err = pcall(fn, inst, params, def)
         if not success then
@@ -333,7 +359,6 @@ function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigge
             return false, err or "EXECUTION_REJECTED"
         end
     end
-
 
     if amount and cost and cost.res then
         ResourceAdapter.DoDelta(inst, cost.res, -amount)

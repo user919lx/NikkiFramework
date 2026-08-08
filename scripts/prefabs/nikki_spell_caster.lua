@@ -47,10 +47,10 @@ local function fn()
     local inst = CreateEntity()
     inst.entity:AddTransform()
     inst.entity:AddNetwork()
+    inst.entity:AddAnimState()
 
     inst:AddTag("CLASSIFIED")
     inst:AddTag("NOCLICK")
-    inst:AddTag("book")
 
     inst:AddComponent("aoetargeting")
     inst.components.aoetargeting:SetAllowWater(false)
