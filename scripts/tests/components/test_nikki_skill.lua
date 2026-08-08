@@ -19,10 +19,12 @@ return function()
         SetMaxRange = function(self, r) replica_range_set = r end
     }
 
+    -- 【修复核心】：为 mock_resolver 补全 GetSkillCooldown 接口
     local mock_resolver = {
         OnSkillAdd = function() end,
         OnSkillRemove = function() end,
         GetSkillRange = function(self, id) return id == "skill_long" and 10 or (id == "skill_mid" and 5 or nil) end,
+        GetSkillCooldown = function(self, id) return 0 end, -- 补全 CD 查询回调
         ExecuteServerTrigger = function() return true, "SUCCESS" end
     }
 

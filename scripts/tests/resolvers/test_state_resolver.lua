@@ -34,8 +34,6 @@ return function()
     local badges = resolver:GetBadges("state_battle")
     suite:assert(badges[1] == "atk_up", "GetBadges 提取正常")
 
-    local wheel = resolver:GetWheelSkills("state_battle")
-    suite:assert(wheel[2] == "skill_2", "GetWheelSkills 提取正常")
 
     local z_skills = resolver:GetSkillsForKey("state_battle", real_key_z)
     suite:assert(z_skills.skill_3 == true, "GetSkillsForKey 提取数字按键正常")

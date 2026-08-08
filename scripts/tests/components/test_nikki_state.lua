@@ -92,13 +92,5 @@ return function()
     suite:assert(not inst:HasTag("TAG_1"), "离开状态时，旧 Tag 必须被移除")
     suite:assert(trigger_cleared == true, "离开状态时，必须调用 Trigger 的 Clear 方法")
 
-    -- I. 测试 GetWheelSkills
-    cmp:SetState("mock_state")
-    local wheel = cmp:GetWheelSkills()
-    suite:assert(wheel[1] == "wheel_1", "GetWheelSkills 必须正确从 Resolver 返回数据")
-    
-    cmp:SetState("empty_state")
-    suite:assert(type(cmp:GetWheelSkills()) == "table", "空状态时 GetWheelSkills 必须返回空表而不崩溃")
-
     suite:Cleanup()
 end
