@@ -6,6 +6,9 @@ local ResourceAdapter = require("utils/resource_adapter")
 local SkillResolver = Class(BaseResolver, function(self, defs)
     BaseResolver._ctor(self, defs)
 end)
+-- ========================================================
+-- 纯粹的只读查询接口，不修改任何状态
+-- ========================================================
 
 function SkillResolver:GetSkillDef(id) return self:GetDef(id) end
 
@@ -14,10 +17,6 @@ function SkillResolver:GetAllSkillIds() return self:GetAllIds() end
 function SkillResolver:GetSkillName(skill_id) return self:GetDef(skill_id) and self:GetDef(skill_id).name or skill_id end
 
 function SkillResolver:GetSkillRange(skill_id) return self:GetDef(skill_id) and self:GetDef(skill_id).range or nil end
-
--- ========================================================
--- 纯粹的只读查询接口，不修改任何状态
--- ========================================================
 
 -- 查询技能轮数据
 function SkillResolver:GetSkillWheel(skill_id)
@@ -49,15 +48,6 @@ function SkillResolver:GetSkillCooldown(skill_id, trigger_type, trigger_key)
     return ctx.cd or def.cd or 0
 end
 
-function SkillResolver:OnSkillAdd(inst, skill_id)
-    local def = self:GetDef(skill_id)
-    if def and type(def.on_add) == "function" then pcall(def.on_add, inst, def) end
-end
-
-function SkillResolver:OnSkillRemove(inst, skill_id)
-    local def = self:GetDef(skill_id)
-    if def and type(def.on_remove) == "function" then pcall(def.on_remove, inst, def) end
-end
 
 function SkillResolver:NeedsServer(skill_id)
     local def = self:GetDef(skill_id)
@@ -66,29 +56,6 @@ function SkillResolver:NeedsServer(skill_id)
         if type(def.fn) == "function" then return true end
     end
     return false
-end
-
--- ========================================================
--- 公共验证引擎 (双端通用)
--- ========================================================
-
-
-function SkillResolver:ExecuteClientFn(inst, skill_id, params)
-    local def = self:GetDef(skill_id)
-    if not def then return false, "NOT_FOUND" end
-
-    -- 这里的拦截也必须交还给客户端负责调用的入口 (不再引入 Component)
-    if type(def.client_fn) == "function" then
-        local success, result, err = pcall(def.client_fn, inst, params, def)
-        if not success then
-            log.error("[SkillResolver] client_fn crash in '%s': %s", skill_id, tostring(result))
-            return false, "EXECUTION_CRASHED"
-        elseif result == false then
-            return false, err or "EXECUTION_REJECTED"
-        end
-        return true
-    end
-    return true
 end
 
 function SkillResolver:CheckRequiredTags(inst, skill_id, trigger_type, trigger_key)
@@ -116,8 +83,42 @@ function SkillResolver:CheckRequiredTags(inst, skill_id, trigger_type, trigger_k
 end
 
 -- ========================================================
--- 服务端终极执行引擎 (彻底剔除 Component 调用)
+--  执行阶段
 -- ========================================================
+
+function SkillResolver:OnSkillAdd(inst, skill_id)
+    local def = self:GetDef(skill_id)
+    if def and type(def.on_add) == "function" then pcall(def.on_add, inst, def) end
+end
+
+function SkillResolver:OnSkillRemove(inst, skill_id)
+    local def = self:GetDef(skill_id)
+    if def and type(def.on_remove) == "function" then pcall(def.on_remove, inst, def) end
+end
+
+function SkillResolver:ExecuteClientFn(inst, skill_id, params)
+    local def = self:GetDef(skill_id)
+    if not def then return false, "NOT_FOUND" end
+
+    -- 这里的拦截也必须交还给客户端负责调用的入口 (不再引入 Component)
+    if type(def.client_fn) == "function" then
+        local success, result, err = pcall(def.client_fn, inst, params, def)
+        if not success then
+            local full_stack = debug.traceback(result, 2)
+            -- 分行打印，避免单行过长被截断
+            for line in full_stack:gmatch("[^\n]+") do
+                log.error("[SkillResolver] client_fn crash in '%s': %s", skill_id, line)
+            end
+            return false, "EXECUTION_CRASHED"
+        elseif result == false then
+            return false, err or "EXECUTION_REJECTED"
+        end
+
+        return true
+    end
+    return true
+end
+
 function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigger_key, params)
     local def = self:GetDef(skill_id)
     if not def then return false, "NOT_FOUND" end
