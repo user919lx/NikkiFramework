@@ -14,6 +14,20 @@ local function Attach(inst, owner)
     inst.entity:SetParent(owner.entity)
     if inst.components.inventoryitem then
         inst.components.inventoryitem.GetGrandOwner = function(self) return owner end
+        -- 不能直接赋值 否则无法打开轮盘界面
+        -- inst.components.inventoryitem.owner = owner
+    end
+    if owner.components.inventory then
+        local _CanAccessItem = owner.components.inventory.CanAccessItem
+        owner.components.inventory.CanAccessItem = function(self, item)
+            -- 若校验的对象是当前虚拟施法器，直接无条件放行
+            if item == inst then
+                log.debug("[Nikki Spell Caster] '%s' 正在校验物品 '%s' 的访问权限，已放行。", tostring(owner), tostring(item))
+                return true
+            end
+            log.debug("[Nikki Spell Caster] '%s' 正在校验物品 '%s' 的访问权限。", tostring(owner), tostring(item))
+            return _CanAccessItem(self, item)
+        end
     end
 end
 
@@ -59,7 +73,6 @@ local function fn()
         end
         return false
     end
-
     local _SelectSpell = inst.components.spellbook.SelectSpell
     inst.components.spellbook.SelectSpell = function(self, index)
         local owner = GetCasterOwner(self.inst)
@@ -68,6 +81,14 @@ local function fn()
             self:SetItems(valid_items)
         end
         return _SelectSpell(self, index)
+    end
+    local _CanBeUsedBy = inst.components.spellbook.CanBeUsedBy
+    inst.components.spellbook.CanBeUsedBy = function(self, user)
+        if user and user.replica.nikki_skillwheel then
+            local valid_items = user.replica.nikki_skillwheel:GetWheelItems()
+            self:SetItems(valid_items)
+        end
+        return _CanBeUsedBy(self, user)
     end
 
     inst.entity:SetPristine()
