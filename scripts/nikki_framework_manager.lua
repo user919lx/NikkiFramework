@@ -238,6 +238,12 @@ function NikkiFrameworkManager.Init(config, mod_env)
             end
         end
 
+        if profile_data.custom_modifiers then
+            for mod_type, strategy_data in pairs(profile_data.custom_modifiers) do
+                ModifierAdapter.RegisterStrategy(mod_type, strategy_data)
+            end
+        end
+
         if profile_data.prefabs and type(profile_data.prefabs) == "table" then
             for _, prefab_name in ipairs(profile_data.prefabs) do
                 ResolverRegistry.Register(prefab_name, profile_resolvers)
