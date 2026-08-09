@@ -1,8 +1,7 @@
 -- scripts/components/nikki_skill_trigger.lua
-local NikkiComponentBase = require("components/nikki_component_base")
 local log = require("utils/log")
-local NikkiSkillTrigger = Class(NikkiComponentBase, function(self, inst)
-    NikkiComponentBase._ctor(self, inst)
+local NikkiSkillTrigger = Class(function(self, inst)
+    self.inst = inst
     self.key_triggers = {}
     self.action_triggers = {}
     self._active_event_listeners = {}

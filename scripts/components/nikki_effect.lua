@@ -1,12 +1,22 @@
 -- scripts/components/nikki_effect.lua
-local NikkiComponentBase = require("components/nikki_component_base")
+local ResolverRegistry = require("nikki_resolver_registry")
 local log = require("utils/log")
 
-local NikkiEffect = Class(NikkiComponentBase, function(self, inst)
-    NikkiComponentBase._ctor(self, inst)
+-- 私有懒加载：首次调用时向注册表查一次并缓存到 self._resolver，后续直接读缓存
+local function GetResolver(self)
+    if not self._resolver then
+        local resolvers = ResolverRegistry.Get(self.inst.prefab)
+        self._resolver = resolvers and resolvers.effect or nil
+    end
+    return self._resolver
+end
+
+local NikkiEffect = Class(function(self, inst)
+    self.inst = inst
 
     -- 结构: [effect_id] = { layers = 1, context = {}, timers = { task1, task2... } }
     self._active_effects = {}
+    self._resolver = nil -- 私有缓存
 
     self.inst:ListenForEvent("death", function()
         log.debug("[NikkiEffect] %s died, clearing all active effects.", tostring(self.inst))
@@ -42,20 +52,21 @@ end
 -- 公开 API：施加 Effect
 -- ============================================
 function NikkiEffect:Apply(id, source)
-    if not self.resolver then return false end
+    local resolver = GetResolver(self)
+    if not resolver then return false end
 
     -- 安全屏障：若实体死亡则禁止挂载新效果
     if self.inst.components.health and self.inst.components.health:IsDead() then
         return false
     end
 
-    local duration, max, mode = self.resolver:GetEffectConfig(id)
+    local duration, max, mode = resolver:GetEffectConfig(id)
     local active = self._active_effects[id]
 
     -- 情况 A：首次挂载 (从 0 到 1，需要支付启动成本)
     if not active then
         -- 【激活验资】：检查并扣除单次启动费用 (cost)
-        if not self.resolver:PayActivationCost(self.inst, id) then
+        if not resolver:PayActivationCost(self.inst, id) then
             return false
         end
 
@@ -82,8 +93,8 @@ function NikkiEffect:Apply(id, source)
         }
         active = self._active_effects[id]
 
-        self.resolver:OnEffectStart(self.inst, id, active.context)
-        self.resolver:UpdateEffectLayers(self.inst, id, 1)
+        resolver:OnEffectStart(self.inst, id, active.context)
+        resolver:UpdateEffectLayers(self.inst, id, 1)
         self:_AddTimer(id, duration, active) -- 传入 active 本身
         return true
     end
@@ -109,7 +120,7 @@ function NikkiEffect:Apply(id, source)
         if active.layers < max then
             active.layers = active.layers + 1
             active.context.layer = active.layers
-            self.resolver:UpdateEffectLayers(self.inst, id, active.layers)
+            resolver:UpdateEffectLayers(self.inst, id, active.layers)
             self:_AddTimer(id, duration, active)
         else
             -- 达到上限时：剔除最老的一层 (严格同步剔除 Task 和 end_times)
@@ -129,7 +140,8 @@ end
 -- force_all: true 则直接清空所有层数，false 则按层递减
 -- ============================================
 function NikkiEffect:Remove(id, force_all)
-    if not self.resolver or not self._active_effects[id] then return end
+    local resolver = GetResolver(self)
+    if not resolver or not self._active_effects[id] then return end
 
     local active = self._active_effects[id]
 
@@ -146,11 +158,11 @@ function NikkiEffect:Remove(id, force_all)
         -- 还有剩余层数，仅降级
         active.layers = target_layer
         active.context.layer = target_layer
-        self.resolver:UpdateEffectLayers(self.inst, id, target_layer)
+        resolver:UpdateEffectLayers(self.inst, id, target_layer)
     else
         -- 层数归零，彻底注销
         for _, t in ipairs(active.timers) do t:Cancel() end
-        self.resolver:OnEffectEnd(self.inst, id, active.context)
+        resolver:OnEffectEnd(self.inst, id, active.context)
         self._active_effects[id] = nil
     end
 end
@@ -159,9 +171,9 @@ end
 -- 公开 API：查询 Effect 是否为永久效果（无 duration）
 -- ============================================
 function NikkiEffect:IsPermanent(id)
-    if not self.resolver then return false end
-    local duration, _, _ = self.resolver:GetEffectConfig(id)
-    -- 如果 duration 为 nil，说明是永久效果
+    local resolver = GetResolver(self)
+    if not resolver then return false end
+    local duration, _, _ = resolver:GetEffectConfig(id)
     return duration == nil
 end
 
@@ -193,7 +205,8 @@ end
 -- 帧更新：处理业务 Tick 与持续扣费卸载
 -- ============================================
 function NikkiEffect:OnUpdate(dt)
-    if not self.resolver then return end
+    local resolver = GetResolver(self)
+    if not resolver then return end
 
     -- 安全屏障：实体死亡后停止挂载的 fn 轮询
     if self.inst.components.health and self.inst.components.health:IsDead() then
@@ -202,7 +215,7 @@ function NikkiEffect:OnUpdate(dt)
 
     for id, active in pairs(self._active_effects) do
         -- 交由 Resolver 处理周期性消耗/回复 (drain) 与 fn，返回 false 时触发自我卸载
-        local should_keep = self.resolver:OnUpdateEffect(self.inst, id, dt, active.context, active.layers)
+        local should_keep = resolver:OnUpdateEffect(self.inst, id, dt, active.context, active.layers)
         if not should_keep then
             self:Remove(id, true)
         end

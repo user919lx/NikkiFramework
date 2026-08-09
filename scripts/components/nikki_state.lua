@@ -1,25 +1,33 @@
 -- scripts/components/nikki_state.lua
-local NikkiComponentBase = require("components/nikki_component_base")
+local ResolverRegistry = require("nikki_resolver_registry")
 local log = require("utils/log")
+
+-- 私有懒加载：首次调用时向注册表查一次并缓存到 self._resolver，后续直接读缓存
+local function GetResolver(self)
+    if not self._resolver then
+        local resolvers = ResolverRegistry.Get(self.inst.prefab)
+        self._resolver = resolvers and resolvers.state or nil
+    end
+    return self._resolver
+end
+
 local function on_state(self, state)
     if self.inst.replica.nikki_state then self.inst.replica.nikki_state:SetState(state) end
     self.inst:PushEvent("nikki_state_dirty", { state = state })
 end
 
-local NikkiState = Class(NikkiComponentBase, function(self, inst)
-    NikkiComponentBase._ctor(self, inst)
-    self.default_state = "default"
+local NikkiState = Class(function(self, inst)
+    self.inst = inst
     self.state = nil
+    self._resolver = nil -- 私有缓存
     self._active_overlay_skills = {}
     self._active_overlay_effects = {}
     self._active_tags = {}
-end, { state = on_state })
-
-function NikkiState:Init(resolver, default_state)
-    if default_state then self.default_state = default_state end
-    self:SetResolver(resolver)
-    self:SetState(self.state or self.default_state)
-end
+end,
+nil,
+{ 
+    state = on_state
+})
 
 function NikkiState:SetState(state, force)
     if self.state == state and not force then return end
@@ -29,8 +37,9 @@ function NikkiState:SetState(state, force)
 end
 
 function NikkiState:RefreshOverlay()
-    if not self.resolver then return end
-    local def = self.resolver:GetStateDef(self.state)
+    local resolver = GetResolver(self)
+    if not resolver then return end
+    local def = resolver:GetStateDef(self.state)
     self:ApplyStateDef(def)
 end
 
@@ -92,7 +101,6 @@ end
 --                      查询接口
 -- =========================================================
 
--- 查询当前状态
 function NikkiState:GetState()
     return self.state
 end

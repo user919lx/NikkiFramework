@@ -19,7 +19,6 @@ local init = {
         modifier_adapter = require("tests/utils/test_modifier_adapter"),
     },
     components = {
-        nikki_component_base = require("tests/components/test_nikki_component_base"),
         nikki_state = require("tests/components/test_nikki_state"),
         nikki_skill = require("tests/components/test_nikki_skill"),
         nikki_skill_trigger = require("tests/components/test_nikki_skill_trigger"),
