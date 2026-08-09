@@ -27,21 +27,20 @@ end
 -- 客机执行与 RPC 发送引擎
 -- ========================================================
 
-function NikkiSkill:CastKey(key_code, skills_dict)
+function NikkiSkill:CastKey(key_code, skills_dict, params)
     local resolver = ResolverRegistry.Get("skill")
     if not resolver then return end
 
-    local needs_server = false
-    local params = { key = key_code }
+    params = params or { key = key_code }
+    local skills_to_send = {}
 
     -- 遍历执行客机预测
     for skill_id, _ in pairs(skills_dict) do
         if resolver:CheckRequiredTags(self.inst, skill_id, "keys", key_code) then
-            -- 这里完美接收双返回值
             local should_proceed, err = resolver:ExecuteClientFn(self.inst, skill_id, params)
             if should_proceed then
                 if resolver:NeedsServer(skill_id) then
-                    needs_server = true
+                    table.insert(skills_to_send, skill_id)
                 end
             else
                 log.debug("[NikkiSkill] Client rejected skill %s. Reason: %s", skill_id, tostring(err))
@@ -49,9 +48,17 @@ function NikkiSkill:CastKey(key_code, skills_dict)
         end
     end
 
-    -- 由技能系统亲自决定是否发包
-    if needs_server then
-        SendModRPCToServer(GetModRPC("NikkiFramework", "CastKey"), key_code)
+    -- 【架构修正】：客机解析完后，直接告诉主机去放具体的 Skill！不再发 Key_Code！
+    for _, skill_id in ipairs(skills_to_send) do
+        local target = params.target
+        local has_pos = false
+        local px, pz = 0, 0
+        if params.pos then
+            has_pos = true
+            px = params.pos.x
+            pz = params.pos.z
+        end
+        SendModRPCToServer(GetModRPC("NikkiFramework", "CastSkill"), skill_id, target, has_pos, px, pz)
     end
 end
 

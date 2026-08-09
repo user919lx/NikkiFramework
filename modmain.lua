@@ -14,21 +14,15 @@ AddReplicableComponent("nikki_skill")
 
 
 
--- ========================================================
--- 1. 注册服务端 RPC (Master Server)
--- ========================================================
-AddModRPCHandler("NikkiFramework", "CastKey", function(player, key_code)
-    if player and player.components.nikki_skill_trigger then
-        player.components.nikki_skill_trigger:CastKey(key_code)
-    end
-end)
-
+-- 废除 CastKey RPC，统一使用 CastSkill
 AddModRPCHandler("NikkiFramework", "CastSkill", function(player, skill_id, target, has_pos, px, pz)
-    if player and player.components.nikki_skill then
+    -- 统一网关：必须先经过 nikki_skill_trigger 拦截并记录上下文！
+    if player and player.components.nikki_skill_trigger then
         local params = {}
         if target then params.target = target end
         if has_pos then params.pos = GLOBAL.Vector3(px, 0, pz) end
-        player.components.nikki_skill:CastSkill(skill_id, params)
+        -- 交给 Trigger 缓存目标，再由其转发给 Skill
+        player.components.nikki_skill_trigger:CastSkill(skill_id, params)
     end
 end)
 
