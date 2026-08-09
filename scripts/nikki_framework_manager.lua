@@ -39,7 +39,7 @@ local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resou
                 local c_name = config_data.component.name
                 if not inst.components[c_name] then
                     inst:AddComponent(c_name)
-                    log.debug("[NikkiFramework] Auto-added custom resource component: '%s' to '%s'", c_name,
+                    log.debug("[Manager] Auto-added custom resource component: '%s' to '%s'", c_name,
                         tostring(inst))
                 end
             end
@@ -80,7 +80,7 @@ function NikkiFrameworkManager.Init(config, mod_env)
         for res_id, config_data in pairs(config.custom_resources) do
             ResourceAdapter.RegisterStrategy(res_id, config_data)
             if config_data.ui and config_data.component and config_data.component.name then
-                log.debug("[NikkiFramework] Auto-adding replicable component: '%s'", config_data.component.name)
+                log.debug("[Manager] Auto-adding replicable component: '%s'", config_data.component.name)
                 mod_env.AddReplicableComponent(config_data.component.name)
             end
         end
@@ -121,7 +121,7 @@ function NikkiFrameworkManager.Init(config, mod_env)
             local effect_data = require(defs.effect)
             if effect_data then
                 def_resolvers.effect:AddDefs(effect_data)
-                log.debug("[NikkiFramework] Appended effects to global pool.")
+                log.debug("[Manager] Appended effects to global pool from '%s'.", defs.effect)
             end
         end
 
@@ -129,13 +129,13 @@ function NikkiFrameworkManager.Init(config, mod_env)
             raw_skill_data = require(defs.skill)
             if raw_skill_data then
                 def_resolvers.skill:AddDefs(raw_skill_data)
-                log.debug("[NikkiFramework] Appended skills to global pool.")
+                log.debug("[Manager] Appended skills to global pool from '%s'.", defs.skill)
             end
         end
 
         if defs.state then
             def_resolvers.state:AddStateConfig(defs.state, raw_skill_data)
-            log.debug("[NikkiFramework] Appended states to global pool.")
+            log.debug("[Manager] Appended states to global pool.")
 
             if type(defs.state) == "table" and defs.state.default then
                 default_state = defs.state.default
@@ -155,7 +155,7 @@ function NikkiFrameworkManager.Init(config, mod_env)
                 for _, prefab in ipairs(tier_cfg.prefabs) do
                     mod_env.AddPrefabPostInit(prefab, function(inst)
                         ApplyFrameworkToInst(inst, tier_name, default_state, config.custom_resources)
-                        log.debug("[NikkiFramework] Prefab PostInit (%s) completed for '%s'", tier_name, prefab)
+                        log.debug("[Manager] Prefab PostInit (%s) completed for '%s'", tier_name, prefab)
                     end)
                 end
             end
@@ -166,7 +166,7 @@ function NikkiFrameworkManager.Init(config, mod_env)
                 mod_env.AddPrefabPostInitAny(function(inst)
                     if inst.HasTag and inst:HasTag(tag_name) then
                         ApplyFrameworkToInst(inst, tier_name, default_state, config.custom_resources)
-                        log.debug("[NikkiFramework] Tag PostInit (%s) completed for tag '%s' on prefab '%s'", tier_name,
+                        log.debug("[Manager] Tag PostInit (%s) completed for tag '%s' on prefab '%s'", tier_name,
                             tag_name, inst.prefab)
                     end
                 end)

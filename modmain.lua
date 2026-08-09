@@ -38,12 +38,10 @@ if not GLOBAL.TheNet:IsDedicated() then
         local player = GLOBAL.ThePlayer
         if not player or not player:IsValid() then return end
         if GLOBAL.TheFrontEnd:GetActiveScreen() ~= player.HUD then return end
-
         if player.replica.nikki_skill_trigger then
             player.replica.nikki_skill_trigger:CastKey(key)
         end
     end)
-
     local BADGE_SPACING = 62 -- 与 Combined Status 三围徽章间距一致
     local function AddExtraStatusWidget(self)
         if self.owner and self.owner:HasTag("nikki_framework") then
@@ -59,12 +57,4 @@ end
 
 if not is_debug_mode then
     return
-end
--- 加载测试框架
-local require = GLOBAL.require
--- 动态加载 tests/components 下所有 .lua 文件
-GLOBAL.c_nikki_run_tests = function()
-    print("\n[NikkiFramework] Initiating In-Engine Tests...")
-    require("tests/components/test_nikki_state")()
-    print("[NikkiFramework] All In-Engine Tests Executed.\n")
 end

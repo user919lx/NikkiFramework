@@ -1,8 +1,7 @@
 -- scripts/nikki_client_settings.lua
 local json = require("json")
-
 local FILE_NAME = "nikki_skill_framework_client_settings"
-
+local log = require("utils/log")
 local NikkiClientSettings = {}
 -- 默认设置（以后加新配置只需在这里加一行，下面代码全通用）
 local settings = {
@@ -14,7 +13,7 @@ function NikkiClientSettings.Save()
     if success then
         TheSim:SetPersistentString(FILE_NAME, str, false)
     else
-        print("[NikkiClientSettings] Failed to encode JSON.")
+        log.error("[NikkiClientSettings] Failed to encode JSON.")
     end
 end
 
@@ -27,7 +26,7 @@ function NikkiClientSettings.Load()
                     settings[k] = v
                 end
             else
-                print("[NikkiClientSettings] Failed to decode JSON.")
+                log.error("[NikkiClientSettings] Failed to decode JSON.")
             end
         end
     end)
