@@ -24,7 +24,7 @@ local NikkiState = Class(function(self, inst)
     self._active_tags = {}
 end,
 nil,
-{ 
+{
     state = on_state
 })
 
@@ -102,6 +102,26 @@ end
 
 function NikkiState:GetState()
     return self.state
+end
+
+-- =========================================================
+--                      持久化存储
+-- =========================================================
+function NikkiState:OnSave()
+    return {
+        state = self.state,
+    }
+end
+
+function NikkiState:OnLoad(data)
+    if data and data.state then
+        -- 延迟 0 帧执行：防止 AnimState:SetBuild 被官方换肤系统(skinner)或实体初始化的原生逻辑覆盖
+        self.inst:DoTaskInTime(0, function()
+            -- 传入 true 进行 force 强制刷新，确保视觉和数据组件被完全重置并覆盖
+            self:SetState(data.state, true)
+            log.debug("[NikkiState] Loaded state %s for %s", tostring(data.state), tostring(self.inst))
+        end)
+    end
 end
 
 return NikkiState
