@@ -272,12 +272,34 @@ end
 
 function SkillResolver:OnSkillAdd(inst, skill_id)
     local def = self:GetDef(skill_id)
-    if def and type(def.on_add) == "function" then pcall(def.on_add, inst, def) end
+    if not def then return end
+
+    -- 自动赋予技能声明的能力通行证 Tag
+    if def.tags then
+        for _, tag in ipairs(def.tags) do
+            inst:AddTag(tag)
+        end
+    end
+
+    if type(def.on_add) == "function" then
+        pcall(def.on_add, inst, def)
+    end
 end
 
 function SkillResolver:OnSkillRemove(inst, skill_id)
     local def = self:GetDef(skill_id)
-    if def and type(def.on_remove) == "function" then pcall(def.on_remove, inst, def) end
+    if not def then return end
+
+    -- 自动剥夺技能声明的能力通行证 Tag
+    if def.tags then
+        for _, tag in ipairs(def.tags) do
+            inst:RemoveTag(tag)
+        end
+    end
+
+    if type(def.on_remove) == "function" then
+        pcall(def.on_remove, inst, def)
+    end
 end
 
 function SkillResolver:ExecuteClientFn(inst, skill_id, params)
