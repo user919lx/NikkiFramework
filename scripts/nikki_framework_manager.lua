@@ -193,8 +193,12 @@ function NikkiFrameworkManager.Init(config, mod_env)
         local profile_resolvers = {}
         local raw_skill_data, raw_state_data = nil, nil
 
-        local basic_state = profile_data.basic_state or "basic"
-        local default_state = profile_data.default_state or "default"
+        -- 解析合并后的 state 配置结构
+        local state_cfg = profile_data.state
+        local state_file = type(state_cfg) == "table" and state_cfg.file or
+        (type(state_cfg) == "string" and state_cfg or nil)
+        local basic_state = type(state_cfg) == "table" and state_cfg.basic or profile_data.basic_state or "basic"
+        local default_state = type(state_cfg) == "table" and state_cfg.default or profile_data.default_state or "default"
 
         if profile_data.effect then
             local effect_data = require(profile_data.effect)
@@ -212,8 +216,8 @@ function NikkiFrameworkManager.Init(config, mod_env)
                     table.count(raw_skill_data))
             end
         end
-        if profile_data.state then
-            raw_state_data = require(profile_data.state)
+        if state_file then
+            raw_state_data = require(state_file)
             if raw_state_data then
                 PrecompileStates(raw_state_data, raw_skill_data, basic_state)
                 profile_resolvers.state = StateResolver(raw_state_data)
@@ -285,11 +289,11 @@ function NikkiFrameworkManager.Init(config, mod_env)
                         end
                     end
 
-                    if profile_resolvers.effect then inst.components.nikki_effect:SetResolver(profile_resolvers.effect) end
-                    if profile_resolvers.skill then inst.components.nikki_skill:SetResolver(profile_resolvers.skill) end
-                    if profile_resolvers.state then
-                        inst.components.nikki_state:Init(profile_resolvers.state, default_state)
+                    -- 移除所有的 SetResolver，State 在 0 帧后直接赋予初始形态
+                    if inst.components.nikki_state then
+                        inst.components.nikki_state:SetState(default_state)
                     end
+
                     log.debug("[NikkiFramework] PostInit completed for prefab '%s' with profile '%s'", prefab_name,
                         profile_name)
                 end)
