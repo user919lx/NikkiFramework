@@ -44,7 +44,7 @@ local function HookActionForSkill(action_id)
     if not action or action._nikki_hooked then return end
     local old_fn = action.fn
     action.fn = function(act)
-        local origin_result = old_fn and old_fn(act) or nil
+        local origin_result, origin_reason = old_fn and old_fn(act) or nil, nil
         if act.doer and act.doer.components.nikki_skill_trigger then
             local params = {
                 act = act,
@@ -54,10 +54,10 @@ local function HookActionForSkill(action_id)
                 invobject = act.invobject,
                 origin_result = origin_result
             }
-            local skill_res = act.doer.components.nikki_skill_trigger:CastAction(act.action.id, params)
-            if old_fn == nil then return skill_res end
+            local result, reason = act.doer.components.nikki_skill_trigger:CastAction(act.action.id, params)
+            return result, reason
         end
-        return origin_result
+        return origin_result, origin_reason
     end
     action._nikki_hooked = true
 end
@@ -112,8 +112,6 @@ function StateResolver:AddStateConfig(state_cfg, raw_skill_data)
             ApplyTriggerOverrides(compiled_triggers, basic.triggers)
             ApplyTriggerOverrides(compiled_triggers, state_def.triggers)
             state_def.compiled_triggers = compiled_triggers
-
-            -- 顺手将使用到的 Action 自动挂载 Hook
             if compiled_triggers.actions then
                 for action_id, _ in pairs(compiled_triggers.actions) do
                     HookActionForSkill(action_id)

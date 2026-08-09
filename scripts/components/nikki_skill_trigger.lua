@@ -97,7 +97,10 @@ function NikkiSkillTrigger:CastAction(action_id, params)
     if not skills or not self.inst.components.nikki_skill then return false end
 
     for skill_id, _ in pairs(skills) do
-        self.inst.components.nikki_skill:ExecuteTrigger(skill_id, "actions", action_id, params)
+        local res, reason = self.inst.components.nikki_skill:ExecuteTrigger(skill_id, "actions", action_id, params)
+        if res == false then
+            return false, reason
+        end
     end
     return true
 end
