@@ -44,6 +44,9 @@ function EffectResolver:UpdateEffectLayers(inst, id, layers)
     if def.mods then
         for mod_type, value in pairs(def.mods) do ModifierAdapter.Apply(inst, mod_type, value, id, layers) end
     end
+    if type(def.on_layer_update) == "function" then
+        pcall(def.on_layer_update, inst, layers, def)
+    end
 end
 
 -- ========================================================
@@ -72,9 +75,16 @@ end
 function EffectResolver:OnUpdateEffect(inst, id, dt, context, layers)
     local def = self:GetDef(id)
     if not def then return false end
-
     local res = def.drain and def.drain.res
     local rate = def.drain and def.drain.rate or 0
+    if type(rate) == "function" then
+        local ok, result = pcall(rate, inst, def, context)
+        if not ok then
+            log.error("[EffectResolver] Error in drain rate function for '%s': %s", id, tostring(result))
+            return false
+        end
+        rate = result or 0
+    end
     local drain_amount = rate * dt * (layers or 1)
 
     -- 1. 验资阶段 (仅 rate > 0 时预检，不足则直接终止退出)
