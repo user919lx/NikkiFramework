@@ -55,8 +55,13 @@ return function()
     }
     NikkiFrameworkManager.Init(config, mock_env)
 
-    local resolvers = ResolverRegistry.Get("samansha")
-    suite:assert(resolvers ~= nil and resolvers.skill and resolvers.state, "Init 成功将三个 Resolver 实例化并注入 Registry")
+    local resolvers = {
+        effect = ResolverRegistry.Get("effect"),
+        skill = ResolverRegistry.Get("skill"),
+        state = ResolverRegistry.Get("state"),
+    }
+    suite:assert(resolvers.effect ~= nil and resolvers.skill ~= nil and resolvers.state ~= nil,
+        "Init 成功将三个 Resolver 实例化并注入 Registry")
 
     local fire_mode_def = resolvers.state:GetStateDef("fire_mode")
     suite:assert(fire_mode_def.skills[1] == "fireball", "子形态成功继承了 basic 的 skills")

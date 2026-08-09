@@ -28,85 +28,69 @@ local function GetCasterOwner(inst)
 end
 
 local SkillResolver = Class(BaseResolver, function(self, defs)
+    self.compiled_wheels = {}
+    self.child_skill_ids = {}
     BaseResolver._ctor(self, defs)
-    self:_PrecompileWheelDefs(defs or {})
 end)
 
--- ========================================================
--- 预编译：规范化语义分离与闭包固化
--- ========================================================
-function SkillResolver:_PrecompileWheelDefs(defs)
-    self.compiled_wheels = {}
+-- 预编译 - 增量挂载拦截钩子
+function SkillResolver:OnDefAdded(skill_id, def)
+    if type(def.wheel) == "table" and type(def.wheel.ui) == "table" then
+        local w_def = def.wheel
+        local ui = w_def.ui
+        local aoe = w_def.aoe or {}
 
-    for skill_id, def in pairs(defs) do
-        if type(def.wheel) == "table" and type(def.wheel.ui) == "table" then
-            local w_def = def.wheel
-            local ui = w_def.ui
-            local aoe = w_def.aoe or {}
+        local anim_cfg = ui.anim or (ui.bank and ui)
+        local image_cfg = ui.image or (ui.atlas and ui)
+        local is_anim = anim_cfg ~= nil and (anim_cfg.bank or anim_cfg.build or anim_cfg.anims)
 
-            -- 1. 结构判定
-            local anim_cfg = ui.anim or (ui.bank and ui)
-            local image_cfg = ui.image or (ui.atlas and ui)
-            local is_anim = anim_cfg ~= nil and (anim_cfg.bank or anim_cfg.build or anim_cfg.anims)
+        local checkcooldown_fn = nil
+        local checkenabled_fn = nil
 
-            -- 2. 闭包固化
-            local checkcooldown_fn = nil
-            local checkenabled_fn = nil
-
-            if is_anim then
-                -- Anim 模式：强制统一读取官方组件百分比
-                checkcooldown_fn = function(owner)
-                    if owner and owner.components.spellbookcooldowns then
-                        return owner.components.spellbookcooldowns:GetSpellCooldownPercent(skill_id)
-                    end
-                    return nil
+        if is_anim then
+            checkcooldown_fn = function(owner)
+                if owner and owner.components.spellbookcooldowns then
+                    return owner.components.spellbookcooldowns:GetSpellCooldownPercent(skill_id)
                 end
-                checkenabled_fn = ui.checkenabled
-            else
-                -- Image 模式：强制统一将 CD 状态转化为禁用变灰
-                local user_checkenabled = ui.checkenabled
-                checkenabled_fn = function(owner)
-                    if owner and owner.components.spellbookcooldowns and owner.components.spellbookcooldowns:IsInCooldown(skill_id) then
-                        return false
-                    end
-                    if user_checkenabled then
-                        return user_checkenabled(owner)
-                    end
-                    return true
-                end
+                return nil
             end
-
-            -- 3. 缓化存入预编译字典
-            self.compiled_wheels[skill_id] = {
-                id = skill_id,
-                name = def.name or skill_id,
-
-                -- [顶层控制]
-                instant = w_def.instant == true,
-
-                -- [UI 渲染]
-                is_anim = is_anim,
-                anim_cfg = is_anim and anim_cfg or nil,
-                image_cfg = (not is_anim) and image_cfg or nil,
-                checkcooldown = checkcooldown_fn,
-                checkenabled = checkenabled_fn,
-                widget_scale = ui.widget_scale or 0.6,
-                hit_radius = ui.hit_radius or (not is_anim and 50 or nil),
-                clicksound = ui.clicksound,
-                spacer = ui.spacer,
-                nestedwheel = ui.nestedwheel,
-                helptext = ui.helptext,
-
-                -- [AOE 与 瞄准层]
-                aoe = aoe,
-                state = aoe.state,
-                allow_water = aoe.allow_water,
-                deploy_radius = aoe.deploy_radius,
-                target_fx = aoe.target_fx,
-                should_repeat_cast_fn = aoe.should_repeat_cast_fn,
-                reticule = aoe.reticule, -- 【核心修复】：干净的原生底层注入口
-            }
+            checkenabled_fn = ui.checkenabled
+        else
+            local user_checkenabled = ui.checkenabled
+            checkenabled_fn = function(owner)
+                if owner and owner.components.spellbookcooldowns and owner.components.spellbookcooldowns:IsInCooldown(skill_id) then
+                    return false
+                end
+                if user_checkenabled then
+                    return user_checkenabled(owner)
+                end
+                return true
+            end
         end
+
+        self.compiled_wheels[skill_id] = {
+            id = skill_id,
+            name = def.name or skill_id,
+            instant = w_def.instant == true,
+            is_anim = is_anim,
+            anim_cfg = is_anim and anim_cfg or nil,
+            image_cfg = (not is_anim) and image_cfg or nil,
+            checkcooldown = checkcooldown_fn,
+            checkenabled = checkenabled_fn,
+            widget_scale = ui.widget_scale or 0.6,
+            hit_radius = ui.hit_radius or (not is_anim and 50 or nil),
+            clicksound = ui.clicksound,
+            spacer = ui.spacer,
+            nestedwheel = ui.nestedwheel,
+            helptext = ui.helptext,
+            aoe = aoe,
+            state = aoe.state,
+            allow_water = aoe.allow_water,
+            deploy_radius = aoe.deploy_radius,
+            target_fx = aoe.target_fx,
+            should_repeat_cast_fn = aoe.should_repeat_cast_fn,
+            reticule = aoe.reticule,
+        }
     end
 end
 
@@ -114,9 +98,6 @@ function SkillResolver:IsWheelSkill(skill_id)
     return self.compiled_wheels ~= nil and self.compiled_wheels[skill_id] ~= nil
 end
 
--- ========================================================
--- 工厂接口：传入上下文参数，生产组装好的 Item 对象
--- ========================================================
 function SkillResolver:BuildWheelItem(skill_id, user, order)
     local compiled = self.compiled_wheels and self.compiled_wheels[skill_id]
     if not compiled then return nil end
@@ -179,13 +160,11 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
         end
 
         if is_aoe then
-            -- 清理旧的动作 Tags
             for _, tags in pairs(SG_STATE_MAP) do
                 for _, tag in ipairs(tags) do
                     spell_caster:RemoveTag(tag)
                 end
             end
-            -- 挂载新的动作 Tags
             if compiled.state and SG_STATE_MAP[compiled.state] then
                 for _, tag in ipairs(SG_STATE_MAP[compiled.state]) do
                     spell_caster:AddTag(tag)
@@ -198,7 +177,6 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
 
                 local native_reticule = spell_caster.components.aoetargeting.reticule
                 if native_reticule then
-                    -- 还原默认参数
                     native_reticule.targetfn = nil
                     native_reticule.mousetargetfn = nil
                     native_reticule.updatepositionfn = nil
@@ -209,7 +187,6 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
                     native_reticule.twinstickmode = 1
                     native_reticule.twinstickrange = 8
 
-                    -- 【核心修改】：极其优雅地将干净的 reticule 字典全量注入到底层引擎，不再使用丑陋的 if 过滤
                     if compiled.reticule then
                         for k, v in pairs(compiled.reticule) do
                             native_reticule[k] = v
@@ -244,9 +221,6 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
     return item
 end
 
--- ========================================================
--- 基础查询与执行 API
--- ========================================================
 function SkillResolver:GetSkillDef(id) return self:GetDef(id) end
 
 function SkillResolver:GetAllSkillIds() return self:GetAllIds() end

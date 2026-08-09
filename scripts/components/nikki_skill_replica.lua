@@ -28,19 +28,19 @@ end
 -- ========================================================
 
 function NikkiSkill:CastKey(key_code, skills_dict)
-    local resolvers = ResolverRegistry.Get(self.inst.prefab)
-    if not resolvers or not resolvers.skill then return end
+    local resolver = ResolverRegistry.Get("skill")
+    if not resolver then return end
 
     local needs_server = false
     local params = { key = key_code }
 
     -- 遍历执行客机预测
     for skill_id, _ in pairs(skills_dict) do
-        if resolvers.skill:CheckRequiredTags(self.inst, skill_id, "keys", key_code) then
+        if resolver:CheckRequiredTags(self.inst, skill_id, "keys", key_code) then
             -- 这里完美接收双返回值
-            local should_proceed, err = resolvers.skill:ExecuteClientFn(self.inst, skill_id, params)
+            local should_proceed, err = resolver:ExecuteClientFn(self.inst, skill_id, params)
             if should_proceed then
-                if resolvers.skill:NeedsServer(skill_id) then
+                if resolver:NeedsServer(skill_id) then
                     needs_server = true
                 end
             else
@@ -57,16 +57,16 @@ end
 
 -- 接收来自 UI/Trigger 的直接释放事件
 function NikkiSkill:CastSkill(skill_id, params)
-    local resolvers = ResolverRegistry.Get(self.inst.prefab)
-    if not resolvers or not resolvers.skill then return end
+    local resolver = ResolverRegistry.Get("skill")
+    if not resolver then return end
 
     -- 【1. 客户端拦截】：检查 Tag，不足则直接终止
-    if not resolvers.skill:CheckRequiredTags(self.inst, skill_id, "cast", "default") then
+    if not resolver:CheckRequiredTags(self.inst, skill_id, "cast", "default") then
         return
     end
 
     -- 【2. 客机预测】：执行 client_fn 并接收状态码与错误信息
-    local should_proceed, err = resolvers.skill:ExecuteClientFn(self.inst, skill_id, params)
+    local should_proceed, err = resolver:ExecuteClientFn(self.inst, skill_id, params)
 
     -- 【3. 客机决断】：如果 client_fn 判定失败（return false），直接拦截发包
     if should_proceed == false then
@@ -75,7 +75,7 @@ function NikkiSkill:CastSkill(skill_id, params)
     end
 
     -- 【4. 发包引擎】：客机放行后，交由技能系统决定是否需要发送 RPC
-    if resolvers.skill:NeedsServer(skill_id) then
+    if resolver:NeedsServer(skill_id) then
         local target = nil
         local has_pos = false
         local px, pz = 0, 0

@@ -11,8 +11,8 @@ end)
 -- ==========================================================
 function NikkiSkillWheel:GetWheelItems()
     local user = self.inst
-    local resolvers = ResolverRegistry.Get(user.prefab)
-    if not resolvers or not resolvers.skill then return {} end
+    local resolver = ResolverRegistry.Get("skill")
+    if not resolver then return {} end
 
     local items = {}
     local order = 1
@@ -24,11 +24,11 @@ function NikkiSkillWheel:GetWheelItems()
 
     for _, skill_id in ipairs(target_skill_ids) do
         -- 1. 快速短路：优先确认是否为轮盘技能，避免非轮盘技能触发多余的 Tag 校验和 Debug 日志
-        if resolvers.skill:IsWheelSkill(skill_id) then
+        if resolver:IsWheelSkill(skill_id) then
             -- 2. 确认是轮盘技能后，再进行 Tag 条件判定
-            if resolvers.skill:CheckRequiredTags(user, skill_id, nil, nil) then
+            if resolver:CheckRequiredTags(user, skill_id, nil, nil) then
                 -- 3. 调用工厂生产 Item
-                local item = resolvers.skill:BuildWheelItem(skill_id, user, order)
+                local item = resolver:BuildWheelItem(skill_id, user, order)
                 if item then
                     table.insert(items, item)
                     order = order + 1

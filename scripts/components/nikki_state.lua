@@ -5,8 +5,7 @@ local log = require("utils/log")
 -- 私有懒加载：首次调用时向注册表查一次并缓存到 self._resolver，后续直接读缓存
 local function GetResolver(self)
     if not self._resolver then
-        local resolvers = ResolverRegistry.Get(self.inst.prefab)
-        self._resolver = resolvers and resolvers.state or nil
+        self._resolver = ResolverRegistry.Get("state")
     end
     return self._resolver
 end

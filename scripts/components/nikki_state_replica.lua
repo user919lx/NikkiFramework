@@ -25,27 +25,27 @@ function NikkiStateReplica:GetState()
 end
 
 function NikkiStateReplica:GetBadges()
-    local resolvers = ResolverRegistry.Get(self.inst.prefab)
-    if resolvers and resolvers.state then
-        return resolvers.state:GetBadges(self:GetState())
+    local resolver = ResolverRegistry.Get("state")
+    if resolver then
+        return resolver:GetBadges(self:GetState())
     end
     return nil
 end
 
 -- 【新增接口】：供外部查询当前形态拥有的全部技能 ID 列表
 function NikkiStateReplica:GetSkills()
-    local resolvers = ResolverRegistry.Get(self.inst.prefab)
-    if resolvers and resolvers.state then
-        return resolvers.state:GetSkills(self:GetState())
+    local resolver = ResolverRegistry.Get("state")
+    if resolver then
+        return resolver:GetSkills(self:GetState())
     end
     return {}
 end
 
 -- 供外部（Trigger）查询当前形态的按键绑定
 function NikkiStateReplica:GetSkillsForKey(key_code)
-    local resolvers = ResolverRegistry.Get(self.inst.prefab)
-    if resolvers and resolvers.state then
-        return resolvers.state:GetSkillsForKey(self:GetState(), key_code)
+    local resolver = ResolverRegistry.Get("state")
+    if resolver then
+        return resolver:GetSkillsForKey(self:GetState(), key_code)
     end
     return nil
 end
