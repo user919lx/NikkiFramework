@@ -85,14 +85,14 @@ return function()
     suite:assert(ResourceAdapter.GetUIValue(inst, "weird", "max") == 500, "UI 取值: 重定向 FetchMax 成功")
     suite:assert(ResourceAdapter.GetUIValue(inst, "weird", "rate_scale") == 3, "UI 取值: 重定向 FetchRate 成功")
 
-    -- F. 测试 AddRegen / RemoveRegen
+    -- F. 测试 SetRegen / RemoveRegen
     local task_canceled = false
     inst._nikki_hunger_tasks = {}
     inst.DoPeriodicTask = function(self, time, fn)
         return { Cancel = function() task_canceled = true end }
     end
 
-    ResourceAdapter.AddRegen(inst, "hunger", 1, "test_buff")
+    ResourceAdapter.SetRegen(inst, "hunger", 1, "test_buff")
     suite:assert(inst._nikki_hunger_tasks["test_buff"] ~= nil, "饥额度 Regen 成功创建了 Task 任务")
 
     ResourceAdapter.RemoveRegen(inst, "hunger", "test_buff")

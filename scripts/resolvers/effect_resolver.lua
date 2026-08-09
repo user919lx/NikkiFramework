@@ -31,21 +31,45 @@ function EffectResolver:OnEffectStart(inst, id, context)
 end
 
 function EffectResolver:OnEffectEnd(inst, id, context)
-    local def = self:GetDef(id)
+local def = self:GetDef(id)
     if not def then return end
     if def.tags then for _, tag in ipairs(def.tags) do inst:RemoveTag(tag) end end
     if def.mods then for mod_type, _ in pairs(def.mods) do ModifierAdapter.Remove(inst, mod_type, id) end end
+    if def.drain and def.drain.res then
+        ResourceAdapter.RemoveRegen(inst, def.drain.res, id)
+    end
     if def.on_remove then pcall(def.on_remove, inst, def, context) end
 end
 
-function EffectResolver:UpdateEffectLayers(inst, id, layers)
+function EffectResolver:UpdateEffectLayers(inst, id, layers, context)
     local def = self:GetDef(id)
     if not def then return end
     if def.mods then
         for mod_type, value in pairs(def.mods) do ModifierAdapter.Apply(inst, mod_type, value, id, layers) end
     end
+    if def.drain and def.drain.res then
+        local rate = def.drain.rate or 0
+        if type(rate) == "function" then
+            local ok, result = pcall(rate, inst, def, context)
+            if not ok then
+                log.error("[EffectResolver] Error in drain rate func for '%s': %s", id, tostring(result))
+                rate = 0
+            else
+                rate = result or 0
+            end
+        else
+            rate = rate * layers
+        end
+        context.drain_rate = rate
+        if rate ~= 0 then
+            ResourceAdapter.SetRegen(inst, def.drain.res, -rate, id)
+        else
+            ResourceAdapter.RemoveRegen(inst, def.drain.res, id)
+        end
+    end
+
     if type(def.on_layer_update) == "function" then
-        pcall(def.on_layer_update, inst, layers, def)
+        pcall(def.on_layer_update, inst, layers, def, context)
     end
 end
 
@@ -75,28 +99,16 @@ end
 function EffectResolver:OnUpdateEffect(inst, id, dt, context, layers)
     local def = self:GetDef(id)
     if not def then return false end
-    local res = def.drain and def.drain.res
-    local rate = def.drain and def.drain.rate or 0
-    if type(rate) == "function" then
-        local ok, result = pcall(rate, inst, def, context)
-        if not ok then
-            log.error("[EffectResolver] Error in drain rate function for '%s': %s", id, tostring(result))
-            return false
-        end
-        rate = result or 0
-    end
-    local drain_amount = rate * dt * (layers or 1)
 
-    -- 1. 验资阶段 (仅 rate > 0 时预检，不足则直接终止退出)
-    if res and drain_amount > 0 then
-        local current = ResourceAdapter.GetCurrent(inst, res)
-        if current < drain_amount then
-            log.debug("[EffectResolver] Resource depleted (%s), auto-removing effect '%s'", res, id)
+    -- 验资阶段 (仅针对消耗型 Effect：如果余额枯竭，自我卸载)
+    if def.drain and def.drain.res and context and context.drain_rate and context.drain_rate > 0 then
+        local current = ResourceAdapter.GetCurrent(inst, def.drain.res)
+        if current <= context.drain_rate*dt then
+            log.debug("[EffectResolver] Resource depleted (%s), auto-removing effect '%s'", def.drain.res, id)
             return false
         end
     end
-
-    -- 2. 执行阶段 (仅在显式返回 boolean false 时终止退出)
+    -- 执行阶段 (仅在显式返回 boolean false 时终止退出)
     if def.fn then
         local ok, result = pcall(def.fn, inst, dt, def, context)
         if not ok then
@@ -105,11 +117,6 @@ function EffectResolver:OnUpdateEffect(inst, id, dt, context, layers)
             log.debug("[EffectResolver] Effect function for '%s' returned false, auto-removing effect", id)
             return false
         end
-    end
-
-    -- 3. 结算扣费阶段 (两关都过了，执行实扣/回复)
-    if drain_amount ~= 0 and res then
-        ResourceAdapter.DoDelta(inst, res, -drain_amount)
     end
 
     return true

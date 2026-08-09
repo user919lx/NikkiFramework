@@ -190,7 +190,7 @@ function ResourceAdapter.DoDelta(inst, res_name, amount)
     if comp and strategy then strategy.server.do_delta(comp, amount) end
 end
 
-function ResourceAdapter.AddRegen(inst, res_name, amount, source_id)
+function ResourceAdapter.SetRegen(inst, res_name, amount, source_id)
     local strategy = RESOURCE_STRATEGIES[res_name]
     local comp = ResourceAdapter.GetComponent(inst, res_name)
     if comp and strategy then strategy.server.add_regen(inst, comp, amount, source_id) end

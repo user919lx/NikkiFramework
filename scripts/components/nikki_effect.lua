@@ -93,7 +93,7 @@ function NikkiEffect:Apply(id, source)
         active = self._active_effects[id]
 
         resolver:OnEffectStart(self.inst, id, active.context)
-        resolver:UpdateEffectLayers(self.inst, id, 1)
+        resolver:UpdateEffectLayers(self.inst, id, 1, active.context)
         self:_AddTimer(id, duration, active) -- 传入 active 本身
         return true
     end
@@ -119,7 +119,7 @@ function NikkiEffect:Apply(id, source)
         if active.layers < max then
             active.layers = active.layers + 1
             active.context.layer = active.layers
-            resolver:UpdateEffectLayers(self.inst, id, active.layers)
+            resolver:UpdateEffectLayers(self.inst, id, active.layers, active.context)
             self:_AddTimer(id, duration, active)
         else
             -- 达到上限时：剔除最老的一层 (严格同步剔除 Task 和 end_times)
@@ -157,7 +157,7 @@ function NikkiEffect:Remove(id, force_all)
         -- 还有剩余层数，仅降级
         active.layers = target_layer
         active.context.layer = target_layer
-        resolver:UpdateEffectLayers(self.inst, id, target_layer)
+        resolver:UpdateEffectLayers(self.inst, id, target_layer, active.context)
     else
         -- 层数归零，彻底注销
         for _, t in ipairs(active.timers) do t:Cancel() end
