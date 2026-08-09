@@ -61,6 +61,7 @@ function EffectResolver:UpdateEffectLayers(inst, id, layers, context)
             rate = rate * layers
         end
         context.drain_rate = rate
+        log.debug("[EffectResolver] Updated drain rate for effect '%s' on %s: %s", id, tostring(inst), tostring(rate))
         if rate ~= 0 then
             ResourceAdapter.SetRegen(inst, def.drain.res, -rate, id)
         else
@@ -103,8 +104,9 @@ function EffectResolver:OnUpdateEffect(inst, id, dt, context, layers)
     -- 验资阶段 (仅针对消耗型 Effect：如果余额枯竭，自我卸载)
     if def.drain and def.drain.res and context and context.drain_rate and context.drain_rate > 0 then
         local current = ResourceAdapter.GetCurrent(inst, def.drain.res)
-        if current <= context.drain_rate*dt then
-            log.debug("[EffectResolver] Resource depleted (%s), auto-removing effect '%s'", def.drain.res, id)
+        local drain_amount = context.drain_rate * dt
+        log.debug("[EffectResolver] Draining %s of %s for effect '%s' on %s (current: %.2f)", tostring(drain_amount), def.drain.res, id, tostring(inst), current)
+        if current <= drain_amount then
             return false
         end
     end

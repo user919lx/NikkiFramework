@@ -216,7 +216,7 @@ function NikkiEffect:OnUpdate(dt)
         -- 交由 Resolver 处理周期性消耗/回复 (drain) 与 fn，返回 false 时触发自我卸载
         local should_keep = resolver:OnUpdateEffect(self.inst, id, dt, active.context, active.layers)
         if not should_keep then
-            self:Remove(id, true)
+            self:Remove(id)
         end
     end
 end

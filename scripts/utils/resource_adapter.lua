@@ -16,7 +16,7 @@ local function CreateStrategy(config_data)
     -- 读取重定向字符串，无则使用默认规范命名
     local fn_get_current = comp_cfg.get_current or "GetCurrent"
     local fn_do_delta = comp_cfg.do_delta or "DoDelta"
-    local fn_add_regen = comp_cfg.add_regen or "SetRegenMod"
+    local fn_set_regen = comp_cfg.set_regen or "SetRegenMod"
     local fn_remove_regen = comp_cfg.remove_regen or "RemoveRegenMod"
 
     local fn_get_percent = rep_cfg.get_percent or "GetPercent"
@@ -33,8 +33,8 @@ local function CreateStrategy(config_data)
             do_delta = function(comp, amount)
                 if type(comp[fn_do_delta]) == "function" then comp[fn_do_delta](comp, amount, false) end
             end,
-            add_regen = function(inst, comp, amount, src)
-                if type(comp[fn_add_regen]) == "function" then comp[fn_add_regen](comp, inst, amount, src) end
+            set_regen = function(inst, comp, amount, src)
+                if type(comp[fn_set_regen]) == "function" then comp[fn_set_regen](comp, inst, amount, src) end
             end,
             remove_regen = function(inst, comp, src)
                 if type(comp[fn_remove_regen]) == "function" then comp[fn_remove_regen](comp, inst, src) end
@@ -73,7 +73,7 @@ local RESOURCE_STRATEGIES = {
             comp_name = "health",
             get_current = function(comp) return comp.currenthealth or 0 end,
             do_delta = function(comp, amount) comp:DoDelta(amount, false, "nikki_skill") end,
-            add_regen = function(inst, comp, amount, src) if comp.AddRegenSource then comp:AddRegenSource(inst, amount, 1, src) end end,
+            set_regen = function(inst, comp, amount, src) if comp.AddRegenSource then comp:AddRegenSource(inst, amount, 1, src) end end,
             remove_regen = function(inst, comp, src) if comp.RemoveRegenSource then comp:RemoveRegenSource(inst, src) end end
         },
     },
@@ -82,7 +82,7 @@ local RESOURCE_STRATEGIES = {
             comp_name = "sanity",
             get_current = function(comp) return comp.current or 0 end,
             do_delta = function(comp, amount) comp:DoDelta(amount, false) end,
-            add_regen = function(inst, comp, amount, src) if comp.externalmodifiers then comp.externalmodifiers:SetModifier(inst, amount, src) end end,
+            set_regen = function(inst, comp, amount, src) if comp.externalmodifiers then comp.externalmodifiers:SetModifier(inst, amount, src) end end,
             remove_regen = function(inst, comp, src) if comp.externalmodifiers then comp.externalmodifiers:RemoveModifier(inst, src) end end
         },
     },
@@ -91,7 +91,7 @@ local RESOURCE_STRATEGIES = {
             comp_name = "hunger",
             get_current = function(comp) return comp.current or 0 end,
             do_delta = function(comp, amount) comp:DoDelta(amount, false) end,
-            add_regen = function(inst, comp, amount, src)
+            set_regen = function(inst, comp, amount, src)
                 if not inst._nikki_hunger_tasks then inst._nikki_hunger_tasks = {} end
                 if inst._nikki_hunger_tasks[src] then inst._nikki_hunger_tasks[src]:Cancel() end
                 inst._nikki_hunger_tasks[src] = inst:DoPeriodicTask(1, function()
@@ -193,7 +193,7 @@ end
 function ResourceAdapter.SetRegen(inst, res_name, amount, source_id)
     local strategy = RESOURCE_STRATEGIES[res_name]
     local comp = ResourceAdapter.GetComponent(inst, res_name)
-    if comp and strategy then strategy.server.add_regen(inst, comp, amount, source_id) end
+    if comp and strategy then strategy.server.set_regen(inst, comp, amount, source_id) end
 end
 
 function ResourceAdapter.RemoveRegen(inst, res_name, source_id)
