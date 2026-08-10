@@ -54,6 +54,8 @@ function NikkiSkill:AddSkills(ids)
         if not self:IsAdded(id) then
             resolver:OnSkillAdd(self.inst, id)
             table.insert(self._active_skills, id)
+            log.debug("[NikkiSkill] Added skill '%s' to %s. Current skills: %s", tostring(id), tostring(self.inst),
+                table.concat(self._active_skills, ", "))
         end
     end
     self:_UpdateRangeRadius()
@@ -69,6 +71,8 @@ function NikkiSkill:RemoveSkills(ids)
             for i, existing_id in ipairs(self._active_skills) do
                 if existing_id == id then
                     table.remove(self._active_skills, i)
+                    log.debug("[NikkiSkill] Removed skill '%s' from %s. Current skills: %s", tostring(id), tostring(self.inst),
+                        table.concat(self._active_skills, ", "))
                     break
                 end
             end

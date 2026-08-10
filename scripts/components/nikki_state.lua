@@ -31,8 +31,8 @@ nil,
 function NikkiState:SetState(state, force)
     if self.state == state and not force then return end
     self.state = state
-    self:RefreshOverlay()
     log.debug("[NikkiState] %s state changed to %s", tostring(self.inst), state)
+    self:RefreshOverlay()
 end
 
 function NikkiState:RefreshOverlay()
