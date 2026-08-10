@@ -169,8 +169,6 @@ function NikkiFrameworkManager.Init(config, mod_env)
                 mod_env.AddPrefabPostInitAny(function(inst)
                     if inst.HasTag and inst:HasTag(tag_name) then
                         ApplyFrameworkToInst(inst, tier_name, default_state, config.custom_resources)
-                        log.debug("[Manager] Tag PostInit (%s) completed for tag '%s' on prefab '%s'", tier_name,
-                            tag_name, inst.prefab)
                     end
                 end)
             end
