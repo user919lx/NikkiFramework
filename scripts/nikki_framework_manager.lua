@@ -56,7 +56,17 @@ local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resou
     if not inst.components.nikki_state then inst:AddComponent("nikki_state") end
 
     if inst.components.nikki_state and default_state then
-        inst.components.nikki_state:SetState(default_state)
+        -- 缓存默认状态名
+        inst.components.nikki_state:SetDefaultState(default_state)
+        -- 延迟 0 帧执行：等待其他核心组件 (如 Health) 的 OnLoad 存档数据灌入完毕
+        inst:DoTaskInTime(0, function()
+            -- 如果该实体已经被存档的 OnLoad 接管了状态，或者他处于死亡/鬼魂状态，则放弃强塞 default_state
+            if not inst.components.nikki_state:GetState()
+                and not inst:HasTag("playerghost")
+                and not (inst.components.health and inst.components.health:IsDead()) then
+                inst.components.nikki_state:SetState(default_state)
+            end
+        end)
     end
 
     if tier_level < 3 then return end

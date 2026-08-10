@@ -2,7 +2,7 @@
 local ResolverRegistry = require("nikki_resolver_registry")
 local log = require("utils/log")
 
--- 私有懒加载：首次调用时向注册表查一次并缓存到 self._resolver，后续直接读缓存
+-- 私有懒加载
 local function GetResolver(self)
     if not self._resolver then
         self._resolver = ResolverRegistry.Get("state")
@@ -16,19 +16,54 @@ local function on_state(self, state)
 end
 
 local NikkiState = Class(function(self, inst)
-    self.inst = inst
+        self.inst = inst
+        self.state = nil
+        -- 新增：缓存默认状态，供复活时使用
+        self.default_state = "default"
+
+        self._resolver = nil
+        self._active_overlay_skills = {}
+        self._active_overlay_effects = {}
+        self._active_tags = {}
+
+        -- 【生命周期：死亡】剥离所有形态带来的技能、效果、触发器和外观
+        self.inst:ListenForEvent("death", function()
+            log.debug("[NikkiState] %s died. Clearing all state overlays.", tostring(self.inst))
+            self:ClearState()
+        end)
+
+        -- 【生命周期：复活】恢复到默认形态
+        self.inst:ListenForEvent("ms_respawnedfromghost", function()
+            log.debug("[NikkiState] %s respawned. Restoring default state: %s", tostring(self.inst),
+                tostring(self.default_state))
+            if self.default_state then
+                self:SetState(self.default_state, true)
+            end
+        end)
+    end,
+    nil,
+    {
+        state = on_state
+    })
+
+-- 注入默认状态名
+function NikkiState:SetDefaultState(state)
+    self.default_state = state
+end
+
+-- 净身出户：将状态设空，并清空所有覆盖物
+function NikkiState:ClearState()
     self.state = nil
-    self._resolver = nil -- 私有缓存
-    self._active_overlay_skills = {}
-    self._active_overlay_effects = {}
-    self._active_tags = {}
-end,
-nil,
-{
-    state = on_state
-})
+    self:ApplyStateDef(nil)
+end
 
 function NikkiState:SetState(state, force)
+    -- 【死亡防污染】：如果实体处于死亡或鬼魂状态，拒绝强行写入状态
+    if self.inst:HasTag("playerghost") or (self.inst.components.health and self.inst.components.health:IsDead()) then
+        log.debug("[NikkiState] Refusing to set state '%s', entity %s is dead.", tostring(state), tostring(self.inst))
+        return
+    end
+
     if self.state == state and not force then return end
     self.state = state
     log.debug("[NikkiState] %s state changed to %s", tostring(self.inst), state)
@@ -62,6 +97,7 @@ function NikkiState:ApplyStateDef(def)
     self._active_overlay_effects = {}
     self._active_tags = {}
 
+    -- 传入 nil 时，上述清理工作完成，直接 return 退出，完美实现“净身出户”
     if not def then return end
 
     -- 处理外观
@@ -115,9 +151,13 @@ end
 
 function NikkiState:OnLoad(data)
     if data and data.state then
-        -- 延迟 0 帧执行：防止 AnimState:SetBuild 被官方换肤系统(skinner)或实体初始化的原生逻辑覆盖
         self.inst:DoTaskInTime(0, function()
-            -- 传入 true 进行 force 强制刷新，确保视觉和数据组件被完全重置并覆盖
+            -- 【读档校验】：如果存档载入后发现是个死人，清空一切状态，拒绝恢复外观
+            if self.inst:HasTag("playerghost") or (self.inst.components.health and self.inst.components.health:IsDead()) then
+                self:ClearState()
+                return
+            end
+            -- 活人正常恢复状态
             self:SetState(data.state, true)
             log.debug("[NikkiState] Loaded state %s for %s", tostring(data.state), tostring(self.inst))
         end)
