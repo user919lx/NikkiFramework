@@ -58,10 +58,10 @@ end)
 
 function EffectResolver:GetEffectConfig(id)
     local def = self:GetDef(id)
-    if not def then return nil, 1, "refresh" end
+    if not def then return nil, 1, "refresh", false end
     local max = def.stack and def.stack.max or 1
     local mode = def.stack and def.stack.mode or "refresh"
-    return def.duration, max, mode
+    return def.duration, max, mode, def.bind_to_state
 end
 
 function EffectResolver:HasFn(id)
@@ -137,13 +137,24 @@ function EffectResolver:OnUpdateEffect(inst, id, dt, context, layers)
     local def = self:GetDef(id)
     if not def then return false end
 
-    -- 验资阶段 (仅针对消耗型 Effect：如果余额枯竭，自我卸载)
+    -- 【核心修改】：验资阶段，引入 on_deplete 耗尽策略
     if def.drain and def.drain.res and context and context.drain_rate and context.drain_rate > 0 then
         local current = ResourceAdapter.GetCurrent(inst, def.drain.res)
         if current <= 0.01 then
-            log.debug("[EffectResolver] Effect '%s' on %s auto-removed due to insufficient %s (current: %.2f)", id,
-                tostring(inst), def.drain.res, current)
-            return false
+            -- 标记上下文，供 def.fn 读取并做特殊处理（比如没血了动作变慢）
+            context.is_depleted = true
+
+            -- 读取耗尽策略，默认为移除
+            local on_deplete = def.drain.on_deplete or "remove"
+            if on_deplete == "remove" then
+                log.debug("[EffectResolver] Effect '%s' on %s auto-removed due to insufficient %s (current: %.2f)", id,
+                    tostring(inst), def.drain.res, current)
+                return false
+            end
+            -- 如果配置了 "keep"，则放行，不强制 return false
+        else
+            -- 资源健康，取消枯竭标记
+            context.is_depleted = false
         end
     end
 

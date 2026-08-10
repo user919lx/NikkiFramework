@@ -12,14 +12,28 @@ end
 
 local NikkiEffect = Class(function(self, inst)
     self.inst = inst
-
-    -- 结构: [effect_id] = { layers = 1, context = {}, timers = { task1, task2... } }
     self._active_effects = {}
-    self._resolver = nil -- 私有缓存
+    self._resolver = nil
 
     self.inst:ListenForEvent("death", function()
         log.debug("[NikkiEffect] %s died, clearing all active effects.", tostring(self.inst))
         self:Clear()
+    end)
+
+    -- 【新增】：监听 State 变化事件，精准清理绑定效果
+    self.inst:ListenForEvent("nikki_state_dirty", function(owner, data)
+        local new_state = data and data.state
+        local to_remove = {}
+        -- 先收集需要清理的 id，防止在迭代器中直接修改 table 导致报错
+        for id, active in pairs(self._active_effects) do
+            if active.context.bound_state and active.context.bound_state ~= new_state then
+                table.insert(to_remove, id)
+            end
+        end
+        for _, id in ipairs(to_remove) do
+            log.debug("[NikkiEffect] State changed to '%s', auto-removing bound effect '%s'.", tostring(new_state), id)
+            self:Remove(id, true)
+        end
     end)
 
     self.inst:StartUpdatingComponent(self)
@@ -59,9 +73,10 @@ function NikkiEffect:Apply(id, source)
         return false
     end
 
-    local duration, max, mode = resolver:GetEffectConfig(id)
+    local duration, max, mode, bind_to_state = resolver:GetEffectConfig(id)
     local active = self._active_effects[id]
-    log.debug("[NikkiEffect] Applying effect '%s' on %s (duration: %s, max: %d, mode: %s)", tostring(id), tostring(self.inst), tostring(duration), max, mode)
+    log.debug("[NikkiEffect] Applying effect '%s' on %s (duration: %s, max: %d, mode: %s)", tostring(id),
+        tostring(self.inst), tostring(duration), max, mode)
     -- 情况 A：首次挂载 (从 0 到 1，需要支付启动成本)
     if not active then
         -- 【激活验资】：检查并扣除单次启动费用 (cost)
@@ -79,6 +94,8 @@ function NikkiEffect:Apply(id, source)
                 source = source, -- 记录施法者，解决伤害归属
                 data = {},       -- 留给开发者的状态机黑盒
                 max = max,       -- 顺手把上限传进去
+                bound_state = (bind_to_state and self.inst.components.nikki_state) and
+                    self.inst.components.nikki_state:GetState() or nil,
                 -- 供开发者在 fn 中直接获取剩余时间
                 GetTotalRemain = function(ctx)
                     if #ctx.end_times == 0 then return 0 end
@@ -156,7 +173,8 @@ function NikkiEffect:Remove(id, force_all)
         active.layers = target_layer
         active.context.layer = target_layer
         resolver:UpdateEffectLayers(self.inst, id, target_layer, active.context)
-        log.debug("[NikkiEffect] Effect '%s' on %s reduced to %d layers.", tostring(id), tostring(self.inst), target_layer)
+        log.debug("[NikkiEffect] Effect '%s' on %s reduced to %d layers.", tostring(id), tostring(self.inst),
+            target_layer)
     else
         -- 层数归零，彻底注销
         for _, t in ipairs(active.timers) do t:Cancel() end
