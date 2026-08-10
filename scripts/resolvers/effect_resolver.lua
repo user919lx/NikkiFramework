@@ -98,7 +98,9 @@ function EffectResolver:UpdateEffectLayers(inst, id, layers, context)
     local def = self:GetDef(id)
     if not def then return end
     if def.mods then
-        for mod_type, value in pairs(def.mods) do ModifierAdapter.Apply(inst, mod_type, value, id, layers) end
+        for mod_type, value in pairs(def.mods) do
+            ModifierAdapter.Apply(inst, mod_type, value, id)
+        end
     end
     ApplyResourceRate(inst, id, def, context, layers, "regen")
     ApplyResourceRate(inst, id, def, context, layers, "drain")
@@ -139,7 +141,8 @@ function EffectResolver:OnUpdateEffect(inst, id, dt, context, layers)
     if def.drain and def.drain.res and context and context.drain_rate and context.drain_rate > 0 then
         local current = ResourceAdapter.GetCurrent(inst, def.drain.res)
         if current <= 0.01 then
-            log.debug("[EffectResolver] Effect '%s' on %s auto-removed due to insufficient %s (current: %.2f)", id, tostring(inst), def.drain.res, current)
+            log.debug("[EffectResolver] Effect '%s' on %s auto-removed due to insufficient %s (current: %.2f)", id,
+                tostring(inst), def.drain.res, current)
             return false
         end
     end
