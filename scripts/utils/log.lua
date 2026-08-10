@@ -50,7 +50,7 @@ local function _log_message(level_name, level_value, ...)
     end
     local timestamp = os.time()
     local formatted_time = os.date("%Y-%m-%d %H:%M:%S", timestamp)
-    local output = string.format("[%s] [NikkiFramework] %s %s", formatted_time, level_name, message)
+    local output = string.format("[%s] %s [NikkiFramework] %s", formatted_time, level_name, message)
     print(output)
 end
 
