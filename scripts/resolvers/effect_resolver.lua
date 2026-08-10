@@ -6,6 +6,52 @@ local log = require("utils/log")
 local ResourceAdapter = require("utils/resource_adapter")
 local ModifierAdapter = require("utils/modifier_adapter")
 
+local function GetResourceRate(inst, id, def, context, layers, source, kind)
+    local rate = source.rate or 0
+    if type(rate) == "function" then
+        local ok, result = pcall(rate, inst, def, context)
+        if not ok then
+            log.error("[EffectResolver] Error in %s rate func for '%s': %s", kind, id, tostring(result))
+            return 0
+        end
+        return result or 0
+    end
+
+    return rate * layers
+end
+
+local function ApplyResourceRate(inst, id, def, context, layers, kind)
+    local source = def[kind]
+    if not source then return end
+
+    local rate = GetResourceRate(inst, id, def, context, layers, source, kind)
+    if context then
+        context[kind .. "_rate"] = rate
+    end
+    log.debug("[EffectResolver] Updated %s rate for effect '%s' on %s: %s", kind, id, tostring(inst), tostring(rate))
+
+    if kind == "regen" then
+        ResourceAdapter.SetRegen(inst, source.res, rate, id)
+    else
+        ResourceAdapter.SetDrain(inst, source.res, rate, id)
+    end
+end
+
+local function RemoveResourceRate(inst, id, def, context, kind)
+    local source = def[kind]
+    if not source then return end
+
+    local rate = context and context[kind .. "_rate"] or 0
+    if kind == "regen" then
+        ResourceAdapter.RemoveRegen(inst, source.res, rate, id)
+    else
+        ResourceAdapter.RemoveDrain(inst, source.res, rate, id)
+    end
+
+    log.debug("[EffectResolver] %s removed for effect '%s' on %s (rate: %.2f)", kind == "regen" and "Regen" or "Drain",
+        tostring(id), tostring(inst), rate)
+end
+
 local EffectResolver = Class(BaseResolver, function(self, defs)
     BaseResolver._ctor(self, defs)
 end)
@@ -31,14 +77,21 @@ function EffectResolver:OnEffectStart(inst, id, context)
 end
 
 function EffectResolver:OnEffectEnd(inst, id, context)
-local def = self:GetDef(id)
-    if not def then return end
-    if def.tags then for _, tag in ipairs(def.tags) do inst:RemoveTag(tag) end end
-    if def.mods then for mod_type, _ in pairs(def.mods) do ModifierAdapter.Remove(inst, mod_type, id) end end
-    if def.drain and def.drain.res then
-        ResourceAdapter.RemoveRegen(inst, def.drain.res, id)
+    local def = self:GetDef(id)
+    if not def then
+        return
     end
-    if def.on_remove then pcall(def.on_remove, inst, def, context) end
+    if def.tags then
+        for _, tag in ipairs(def.tags) do inst:RemoveTag(tag) end
+    end
+    if def.mods then
+        for mod_type, _ in pairs(def.mods) do ModifierAdapter.Remove(inst, mod_type, id) end
+    end
+    RemoveResourceRate(inst, id, def, context, "regen")
+    RemoveResourceRate(inst, id, def, context, "drain")
+    if def.on_remove then
+        pcall(def.on_remove, inst, def, context)
+    end
 end
 
 function EffectResolver:UpdateEffectLayers(inst, id, layers, context)
@@ -47,27 +100,8 @@ function EffectResolver:UpdateEffectLayers(inst, id, layers, context)
     if def.mods then
         for mod_type, value in pairs(def.mods) do ModifierAdapter.Apply(inst, mod_type, value, id, layers) end
     end
-    if def.drain and def.drain.res then
-        local rate = def.drain.rate or 0
-        if type(rate) == "function" then
-            local ok, result = pcall(rate, inst, def, context)
-            if not ok then
-                log.error("[EffectResolver] Error in drain rate func for '%s': %s", id, tostring(result))
-                rate = 0
-            else
-                rate = result or 0
-            end
-        else
-            rate = rate * layers
-        end
-        context.drain_rate = rate
-        log.debug("[EffectResolver] Updated drain rate for effect '%s' on %s: %s", id, tostring(inst), tostring(rate))
-        if rate ~= 0 then
-            ResourceAdapter.SetRegen(inst, def.drain.res, -rate, id)
-        else
-            ResourceAdapter.RemoveRegen(inst, def.drain.res, id)
-        end
-    end
+    ApplyResourceRate(inst, id, def, context, layers, "regen")
+    ApplyResourceRate(inst, id, def, context, layers, "drain")
 
     if type(def.on_layer_update) == "function" then
         pcall(def.on_layer_update, inst, layers, def, context)
@@ -104,12 +138,12 @@ function EffectResolver:OnUpdateEffect(inst, id, dt, context, layers)
     -- 验资阶段 (仅针对消耗型 Effect：如果余额枯竭，自我卸载)
     if def.drain and def.drain.res and context and context.drain_rate and context.drain_rate > 0 then
         local current = ResourceAdapter.GetCurrent(inst, def.drain.res)
-        local drain_amount = context.drain_rate * dt
-        log.debug("[EffectResolver] Draining %s of %s for effect '%s' on %s (current: %.2f)", tostring(drain_amount), def.drain.res, id, tostring(inst), current)
-        if current <= drain_amount then
+        if current <= 0.01 then
+            log.debug("[EffectResolver] Effect '%s' on %s auto-removed due to insufficient %s (current: %.2f)", id, tostring(inst), def.drain.res, current)
             return false
         end
     end
+
     -- 执行阶段 (仅在显式返回 boolean false 时终止退出)
     if def.fn then
         local ok, result = pcall(def.fn, inst, dt, def, context)

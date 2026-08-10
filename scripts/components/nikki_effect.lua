@@ -61,7 +61,7 @@ function NikkiEffect:Apply(id, source)
 
     local duration, max, mode = resolver:GetEffectConfig(id)
     local active = self._active_effects[id]
-
+    log.debug("[NikkiEffect] Applying effect '%s' on %s (duration: %s, max: %d, mode: %s)", tostring(id), tostring(self.inst), tostring(duration), max, mode)
     -- 情况 A：首次挂载 (从 0 到 1，需要支付启动成本)
     if not active then
         -- 【激活验资】：检查并扣除单次启动费用 (cost)
@@ -97,10 +97,8 @@ function NikkiEffect:Apply(id, source)
         self:_AddTimer(id, duration, active) -- 传入 active 本身
         return true
     end
-
     -- 情况 B：已经存在，处理叠加与开关规则 (从 1 往后走，跳过启动成本)
     if mode == "toggle" then
-        -- 【开关模式】：二次 Apply 触发直接关闭 (免单卸载)
         self:Remove(id, true)
         return true
     elseif mode == "ignore" then
@@ -158,11 +156,13 @@ function NikkiEffect:Remove(id, force_all)
         active.layers = target_layer
         active.context.layer = target_layer
         resolver:UpdateEffectLayers(self.inst, id, target_layer, active.context)
+        log.debug("[NikkiEffect] Effect '%s' on %s reduced to %d layers.", tostring(id), tostring(self.inst), target_layer)
     else
         -- 层数归零，彻底注销
         for _, t in ipairs(active.timers) do t:Cancel() end
         resolver:OnEffectEnd(self.inst, id, active.context)
         self._active_effects[id] = nil
+        log.debug("[NikkiEffect] Effect '%s' on %s fully removed.", tostring(id), tostring(self.inst))
     end
 end
 
