@@ -28,11 +28,16 @@ local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resou
 
     if not TheWorld.ismastersim then return end
 
-    -- 层级 1: Effect 与 Resources
+    -- 层级 1: 纯粹的 Effect (受击/状态接收者)
+    -- 此层级不再自动挂载任何自定义资源组件，避免给普通怪物带来不必要的性能开销
     if not inst.components.nikki_effect then
         inst:AddComponent("nikki_effect")
     end
 
+    if tier_level < 2 then return end
+
+    -- 层级 2: Resources, Skill 与 State (施法者/技能拥有者)
+    -- 只有达到该层级，才需要消耗/回复资源的组件支持
     if custom_resources then
         for res_id, config_data in pairs(custom_resources) do
             if config_data.component and config_data.component.name then
@@ -46,9 +51,6 @@ local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resou
         end
     end
 
-    if tier_level < 2 then return end
-
-    -- 层级 2: Skill 与 State
     if not inst.components.nikki_skill then inst:AddComponent("nikki_skill") end
     if not inst.components.nikki_skill_trigger then inst:AddComponent("nikki_skill_trigger") end
     if not inst.components.nikki_state then inst:AddComponent("nikki_state") end
@@ -59,7 +61,7 @@ local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resou
 
     if tier_level < 3 then return end
 
-    -- 层级 3: SkillWheel
+    -- 层级 3: SkillWheel (UI / 交互入口)
     if not inst.components.nikki_skillwheel then
         inst:AddComponent("nikki_skillwheel")
     end
@@ -75,6 +77,7 @@ function NikkiFrameworkManager.Init(config, mod_env)
 
     -- ===============================================
     -- 1. 挂载全局扩展层 (Resources & Modifiers)
+    -- 这里仅做全局数据的静态注册，不涉及特定 Prefab 的修改，放最前面无妨
     -- ===============================================
     if config.custom_resources then
         for res_id, config_data in pairs(config.custom_resources) do
