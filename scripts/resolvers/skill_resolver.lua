@@ -33,8 +33,18 @@ local SkillResolver = Class(BaseResolver, function(self, defs)
     BaseResolver._ctor(self, defs)
 end)
 
--- 预编译 - 增量挂载拦截钩子
+-- 预编译
 function SkillResolver:OnDefAdded(skill_id, def)
+    -- 语法糖处理
+    if def.default_triggers then
+        for t_type, t_dict in pairs(def.default_triggers) do
+            for k, v in pairs(t_dict) do
+                if type(v) == "function" then
+                    t_dict[k] = { fn = v }
+                end
+            end
+        end
+    end
     if type(def.wheel) == "table" and type(def.wheel.ui) == "table" then
         local w_def = def.wheel
         local ui = w_def.ui
@@ -237,6 +247,11 @@ function SkillResolver:GetSkillCooldown(skill_id, trigger_type, trigger_key)
         local specific = def.default_triggers[trigger_type][trigger_key]
         if type(specific) == "table" then ctx = specific end
     end
+    -- 如果有独立的子 fn，则不继承父级冷却
+    local is_custom_fn = (ctx.fn ~= nil)
+    if is_custom_fn then
+        return ctx.cd or 0
+    end
     return ctx.cd or def.cd or 0
 end
 
@@ -259,7 +274,13 @@ function SkillResolver:CheckRequiredTags(inst, skill_id, trigger_type, trigger_k
         if type(specific) == "table" then ctx = specific end
     end
 
-    local req_tags = ctx.required_tags or def.required_tags
+    -- 如果有独立的子 fn，则不继承父级的通行证标签
+    local is_custom_fn = (ctx.fn ~= nil)
+    local req_tags = ctx.required_tags
+    if not is_custom_fn and req_tags == nil then
+        req_tags = def.required_tags
+    end
+
     if req_tags then
         for _, tag in ipairs(req_tags) do
             if not inst:HasTag(tag) then
@@ -335,8 +356,16 @@ function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigge
         if type(specific) == "table" then ctx = specific end
     end
 
+    -- 判定是否为独立的子功能
+    local is_custom_fn = (ctx.fn ~= nil)
     local fn = ctx.fn or def.fn
-    local cost = ctx.cost or def.cost
+
+    -- 如果有自定义的 fn，就只认它自己的 cost（没写就是无消耗）；否则才去继承父级的 cost
+    local cost = ctx.cost
+    if not is_custom_fn and cost == nil then
+        cost = def.cost
+    end
+
     local amount = (cost and cost.amount and cost.amount > 0) and cost.amount or nil
 
     if amount then
