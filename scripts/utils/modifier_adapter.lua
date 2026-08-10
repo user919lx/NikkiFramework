@@ -53,7 +53,19 @@ local MODIFIER_STRATEGIES = {
                 inst.components.locomotor:RemoveExternalSpeedMultiplier(inst, effect_id)
             end
         end
-    }
+    },
+    fire_damage_scale = {
+        apply = function(inst, val, effect_id, layers)
+            if inst.components.health then
+                inst.components.health.fire_damage_scale = val
+            end
+        end,
+        remove = function(inst, effect_id)
+            if inst.components.health then
+                inst.components.health.fire_damage_scale = 1
+            end
+        end
+    },
 }
 
 -- 对外开放的注册接口，允许配置字典注入新的属性算法
