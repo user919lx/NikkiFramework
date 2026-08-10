@@ -25,7 +25,6 @@ local function Attach(inst, owner)
                 log.debug("[Nikki Spell Caster] '%s' 正在校验物品 '%s' 的访问权限，已放行。", tostring(owner), tostring(item))
                 return true
             end
-            log.debug("[Nikki Spell Caster] '%s' 正在校验物品 '%s' 的访问权限。", tostring(owner), tostring(item))
             return _CanAccessItem(self, item)
         end
     end
