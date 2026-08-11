@@ -1,59 +1,59 @@
 # Nikki Framework
 
-Nikki Framework 是一个专为《饥荒联机版》(DST) 设计的底层技能框架。它接管了技能系统中繁琐的公共逻辑（如状态管理、触发器路由、生命周期），让 Mod 开发者能完全聚焦于具体的技能表现与玩法设计。
+Nikki Framework 是一个面向《饥荒联机版》的技能底层框架。它已经把技能系统中常见的公共逻辑抽象好了：状态管理、触发器分发、资源消耗、能力切换与生命周期控制等，都由框架统一处理。这样，Mod 开发者可以直接基于这套现成结构去实现自己的角色、技能与玩法，而不需要再从零搭一套底层能力系统。
 
-## 核心能力
+它的核心思路是把能力拆成三层：
 
-*   **技能生命周期管理**：提供标准化接口处理技能的装配、激活、持续耗材计算与移除。
-*   **统一触发器路由**：将按键输入、游戏动作（Actions）与底层事件（Events）统一映射到技能施放。
-*   **动态状态切换**：支持基于形态或流派的“技能+触发器”套组（State）无缝切换。
-*   **数据驱动架构**：通过独立的定义文件装配技能，实现配置与主体逻辑的彻底解耦。
+- Effect：负责持续状态、数值与标签
+- Skill：负责事件触发、瞬时结算与动作执行
+- State：负责把一组能力按形态、流派或模式组织起来
 
-## 框架边界（不做什么）
+这样可以让复杂技能体系更清晰，也更容易扩展和复用。
 
-Nikki Framework 仅提供**基础设施**（底盘与控制系统）。它**不包含**任何具体的技能特效或战斗逻辑。具体的技能会产生什么效果、有怎样的视觉表现，完全由你的上层 Mod 定义。
+## 你可以用它做什么
 
-## 适用场景
+- 快速搭建复杂角色的技能体系
+- 让多形态、多流派的能力切换更容易管理
+- 把“玩法内容”与“底层基础设施”分离开，减少重复代码
+- 让后续新增技能、改造机制时更稳、更快
 
-*   拥有独立、复杂技能体系的角色 Mod。
-*   包含多形态、多流派切换的机制类 Mod。
-*   希望在多个独立 Mod 之间复用同一套底层代码的系列项目。
+## 适合的项目
 
-## 项目结构概览
+- 需要完整、可扩展技能系统的角色 Mod
+- 已经有明确玩法设计，但希望直接站在一套成熟框架上开发的团队或开发者
+- 希望把技能逻辑做成可配置、可扩展、便于长期维护的项目，甚至让策划也能通过配置表快速管理技能
 
-*   **`modmain.lua`**: 框架运行环境对接与基础能力注册。
-*   **`nikki_framework_manager.lua`**: 实体总装配入口。
-*   **`scripts/components/`**: 核心逻辑层，包含技能、触发器、状态与网络同步组件。
-*   **`scripts/resolvers/`**: 数据解析层，负责将外部配置转化为框架可识别的参数。
-*   **`scripts/prefabs/` & `scripts/utils/`**: 框架配套资源与通用辅助函数。
+## 示例 Mod
+
+可以参考这个示范项目：
+https://github.com/user919lx/Samansha
+
+> 这不是一个现成技能包，而是一个可供参考、可继续扩展的框架示范。
 
 ---
 
 # Nikki Framework (English)
 
-Nikki Framework is a foundational skill framework for Don't Starve Together (DST) modding. It handles the tedious plumbing of a skill system (state management, trigger routing, lifecycles) so modders can focus entirely on designing gameplay and visual effects.
+Nikki Framework is a foundational skill framework for Don't Starve Together. It already abstracts the common infrastructure of a skill system, including state management, trigger routing, resource consumption, capability switching, and lifecycle handling. This allows Mod developers to build their own characters, abilities, and gameplay directly on top of a ready-made structure, instead of developing the underlying framework from scratch.
 
-## Core Features
+Its core design separates abilities into three layers: Effect handles persistent states, modifiers, and tags; Skill handles event triggers, instant resolution, and action execution; State organizes a set of abilities by form, style, or mode. This makes complex skill systems easier to understand, extend, and reuse.
 
-*   **Lifecycle Management**: Standardized interfaces for mounting, activating, sustaining (resource draining), and removing skills.
-*   **Unified Trigger Routing**: Seamlessly maps key inputs, in-game actions, and underlying events to skill execution.
-*   **Dynamic State Switching**: Supports flawless transitions between different "skill + trigger" loadouts for multi-form or multi-stance characters.
-*   **Data-Driven Architecture**: Separates configuration from core logic using external definition files.
+## What it can help with
 
-## Framework Boundaries (What it DOES NOT do)
+- Quickly build complex character skill systems
+- Manage multi-form or multi-style ability switching more cleanly
+- Separate gameplay content from underlying infrastructure
+- Reduce repetitive code and make future expansion easier
 
-Nikki Framework provides **infrastructure only**. It does **not** include specific skill effects or combat logic. The actual abilities, visual effects, and gameplay consequences are entirely defined by your upper-layer mod.
+## Best fit for
 
-## Best Fit For
+- Character Mods that need a complete and extensible skill system
+- Developers who already have clear gameplay ideas and want to build on a mature framework instead of creating the base system themselves
+- Projects that aim to turn skill logic into a reusable and maintainable structure
 
-*   Character mods with dedicated, complex skill trees.
-*   Mechanic-heavy mods featuring multiple forms, stances, or loadouts.
-*   Mod series that require a shared, reusable underlying codebase.
+## Example Mod
 
-## Project Structure
+A good reference project is:
+https://github.com/user919lx/Samansha
 
-*   **`modmain.lua`**: Game environment integration.
-*   **`nikki_framework_manager.lua`**: Central assembly and mounting point for entities.
-*   **`scripts/components/`**: Core controllers (skill, trigger, state, replication).
-*   **`scripts/resolvers/`**: Definition parsers translating external data into framework logic.
-*   **`scripts/prefabs/` & `scripts/utils/`**: Supporting prefabs and shared utility scripts.
+> This is not a finished skill pack, but a framework example that can be studied and extended.

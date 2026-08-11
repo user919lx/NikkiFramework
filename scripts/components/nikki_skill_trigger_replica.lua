@@ -1,70 +1,51 @@
 -- scripts/components/nikki_skill_trigger_replica.lua
 local log = require("utils/log")
-local ResolverRegistry = require("nikki_resolver_registry")
 
-local NikkiSkillTriggerReplica = Class(function(self, inst)
+local NikkiSkillTrigger = Class(function(self, inst)
     self.inst = inst
-    self._range_target = net_entity(inst.GUID, "nikki_range_target", "nikki_range_target_dirty")
+    -- 在 Replica 注册网络变量，两端都能直接访问
+    self._range_target = net_entity(inst.GUID, "nikki_skill_trigger._range_target")
 end)
 
--- 【核心】客户端统一按键转发入口
-function NikkiSkillTriggerReplica:CastKey(key_code)
-    -- 1. 通过注册表安全拉取当前 prefab 的解析器（完美解决时差与注入问题）
-    local resolvers = ResolverRegistry.Get(self.inst.prefab)
-    if not resolvers or not resolvers.state or not resolvers.skill then
-        return false
-    end
-
-    -- 2. 获取当前形态 (从 nikki_state_replica 读取)
-    local current_state = "default"
-    if self.inst.replica.nikki_state then
-        current_state = self.inst.replica.nikki_state:GetState() or "default"
-    end
-
-    -- 3. 直接向 StateResolver 查询按键映射
-    local skill_id = resolvers.state:GetSkillForKey(current_state, key_code)
-    if not skill_id then
-        return false
-    end
-
-    -- 4. 向 SkillResolver 查询技能定义，执行客机预测
-    local skill_def = resolvers.skill:GetSkillDef(skill_id)
-    if skill_def and skill_def.on_client_cast then
-        if not skill_def.on_client_cast(self.inst, nil, skill_def) then
-            return false
-        end
-    end
-
-    -- 5. 校验通过，向服务端发送名为 "CastKey" 的统一按键 RPC
-    SendModRPCToServer(GetModRPC("NikkiFramework", "CastKey"), key_code)
-    return true
+function NikkiSkillTrigger:SetRangeTarget(target)
+    self._range_target:set(target ~= nil and target:IsValid() and target or nil)
 end
 
-function NikkiSkillTriggerReplica:CastSkill(id, params)
-    if self.inst.components.nikki_skill then
-        self.inst.components.nikki_skill:CastSkill(id, params)
-    else
-        local target = nil
-        local has_pos = false
-        local px, pz = 0, 0
-        if params and type(params) == "table" then
-            target = params.target
-            if params.pos then
-                has_pos = true
-                px = params.pos.x
-                pz = params.pos.z
-            end
-        end
-        SendModRPCToServer(GetModRPC("NikkiFramework", "CastSkill"), id, target, has_pos, px, pz)
-    end
-end
-
-function NikkiSkillTriggerReplica:SetRangeTarget(target)
-    self._range_target:set(target)
-end
-
-function NikkiSkillTriggerReplica:GetRangeTarget()
+function NikkiSkillTrigger:GetRangeTarget()
     return self._range_target:value()
 end
 
-return NikkiSkillTriggerReplica
+function NikkiSkillTrigger:CastKey(key_code)
+    if not self.inst.replica.nikki_state then return false end
+    local skills = self.inst.replica.nikki_state:GetSkillsForKey(key_code)
+    if not skills then return false end
+
+    -- 【核心注入】：自动提取记忆目标，封装进 params 往下传
+    local params = { key = key_code }
+    local mem_target = self:GetRangeTarget()
+    if mem_target and mem_target:IsValid() then
+        params.target = mem_target
+        log.debug("[NikkiSkillTrigger Replica] Injected memorized target: %s", tostring(mem_target))
+    end
+
+    if self.inst.replica.nikki_skill then
+        self.inst.replica.nikki_skill:CastKey(key_code, skills, params)
+    end
+    return true
+end
+
+function NikkiSkillTrigger:CastSkill(id, params)
+    params = params or {}
+    -- 如果玩家没有显式指定目标，则尝试填充记忆目标
+    if not params.target then
+        local mem_target = self:GetRangeTarget()
+        if mem_target and mem_target:IsValid() then
+            params.target = mem_target
+        end
+    end
+    if self.inst.replica.nikki_skill then
+        self.inst.replica.nikki_skill:CastSkill(id, params)
+    end
+end
+
+return NikkiSkillTrigger

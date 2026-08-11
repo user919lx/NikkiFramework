@@ -1,132 +1,184 @@
 -- scripts/nikki_framework_manager.lua
 local log = require("utils/log")
-log.set_level("debug")
-
+local EffectResolver = require("resolvers/effect_resolver")
 local SkillResolver = require("resolvers/skill_resolver")
 local StateResolver = require("resolvers/state_resolver")
 local ResolverRegistry = require("nikki_resolver_registry")
+local ModifierAdapter = require("utils/modifier_adapter")
+local ResourceAdapter = require("utils/resource_adapter")
 
-local function HookActionForSkill(action_id)
-    local action = ACTIONS[action_id]
-    if not action or action._nikki_hooked then return end
+-- ========================================================
+-- 组件分层装配工厂
+-- ========================================================
+local TIER_LEVELS = { effect = 1, skill = 2, player = 3 }
 
-    local old_fn = action.fn
-    action.fn = function(act)
-        local orig_res = old_fn and old_fn(act) or nil
-        if act.doer and act.doer.components.nikki_skill_trigger then
-            local params = {
-                target = act.target,
-                doer = act.doer,
-                pos = act:GetActionPoint(),
-                invobject = act.invobject,
-                orig_result = orig_res,
-            }
-            local skill_res = act.doer.components.nikki_skill_trigger:CastAction(act.action.id, params)
-            if old_fn == nil then return skill_res end
-        end
-        return orig_res
+local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resources)
+    local tier_level = TIER_LEVELS[tier_name] or 1
+
+    inst:AddTag("nikki_framework")
+
+    if tier_level >= 3 then
+        inst:DoTaskInTime(0, function()
+            if not TheNet:IsDedicated() and inst == ThePlayer then
+                local indicator = SpawnPrefab("nikki_range_indicator")
+                indicator:Attach(inst)
+            end
+        end)
     end
-    action._nikki_hooked = true
-end
 
--- 【新增】：智能混入全局默认触发器
-local function MergeDefaultTriggers(state_data, default_triggers)
-    if not default_triggers or type(default_triggers) ~= "table" then return end
-    for _, state_def in pairs(state_data) do
-        state_def.triggers = state_def.triggers or {}
-        for category, items in pairs(default_triggers) do
-            state_def.triggers[category] = state_def.triggers[category] or {}
-            if type(items) == "table" then
-                -- 处理数组 (如 wheel)
-                if items[1] ~= nil then
-                    for _, v in ipairs(items) do
-                        table.insert(state_def.triggers[category], v)
-                    end
-                    -- 处理字典 (如 keys, actions, events)
-                else
-                    for k, v in pairs(items) do
-                        -- 仅当该形态没有覆盖该键位时，才填入默认值
-                        if state_def.triggers[category][k] == nil then
-                            state_def.triggers[category][k] = v
-                        end
-                    end
+    if not TheWorld.ismastersim then return end
+
+    -- 层级 1: 纯粹的 Effect (受击/状态接收者)
+    -- 此层级不再自动挂载任何自定义资源组件，避免给普通怪物带来不必要的性能开销
+    if not inst.components.nikki_effect then
+        inst:AddComponent("nikki_effect")
+    end
+
+    if tier_level < 2 then return end
+
+    -- 层级 2: Resources, Skill 与 State (施法者/技能拥有者)
+    -- 只有达到该层级，才需要消耗/回复资源的组件支持
+    if custom_resources then
+        for res_id, config_data in pairs(custom_resources) do
+            if config_data.component and config_data.component.name then
+                local c_name = config_data.component.name
+                if not inst.components[c_name] then
+                    inst:AddComponent(c_name)
+                    log.debug("[Manager] Auto-added custom resource component: '%s' to '%s'", c_name,
+                        tostring(inst))
                 end
             end
         end
     end
+
+    if not inst.components.nikki_skill then inst:AddComponent("nikki_skill") end
+    if not inst.components.nikki_skill_trigger then inst:AddComponent("nikki_skill_trigger") end
+    if not inst.components.nikki_state then inst:AddComponent("nikki_state") end
+
+    if inst.components.nikki_state and default_state then
+        -- 缓存默认状态名
+        inst.components.nikki_state:SetDefaultState(default_state)
+        -- 延迟 0 帧执行：等待其他核心组件 (如 Health) 的 OnLoad 存档数据灌入完毕
+        inst:DoTaskInTime(0, function()
+            -- 如果该实体已经被存档的 OnLoad 接管了状态，或者他处于死亡/鬼魂状态，则放弃强塞 default_state
+            if not inst.components.nikki_state:GetState()
+                and not inst:HasTag("playerghost")
+                and not (inst.components.health and inst.components.health:IsDead()) then
+                inst.components.nikki_state:SetState(default_state)
+            end
+        end)
+    end
+
+    if tier_level < 3 then return end
+
+    -- 层级 3: SkillWheel (UI / 交互入口)
+    if not inst.components.nikki_skillwheel then
+        inst:AddComponent("nikki_skillwheel")
+    end
 end
 
+-- ========================================================
+-- Manager 启动入口
+-- ========================================================
 local NikkiFrameworkManager = {}
 
 function NikkiFrameworkManager.Init(config, mod_env)
     if not config or type(config) ~= "table" then return end
 
-    for profile_name, profile_data in pairs(config) do
-        local profile_resolvers = {}
+    -- ===============================================
+    -- 1. 挂载全局扩展层 (Resources & Modifiers)
+    -- 这里仅做全局数据的静态注册，不涉及特定 Prefab 的修改，放最前面无妨
+    -- ===============================================
+    if config.custom_resources then
+        for res_id, config_data in pairs(config.custom_resources) do
+            ResourceAdapter.RegisterStrategy(res_id, config_data)
+            if config_data.ui and config_data.component and config_data.component.name then
+                log.debug("[Manager] Auto-adding replicable component: '%s'", config_data.component.name)
+                mod_env.AddReplicableComponent(config_data.component.name)
+            end
+        end
+    end
 
-        if profile_data.skill then
-            local skill_data = require(profile_data.skill)
-            if type(skill_data) == "table" and next(skill_data) then
-                profile_resolvers.skill = SkillResolver(skill_data)
+    if config.custom_modifiers then
+        for mod_type, strategy_data in pairs(config.custom_modifiers) do
+            ModifierAdapter.RegisterStrategy(mod_type, strategy_data)
+        end
+    end
+
+    -- ===============================================
+    -- 2. 补齐并获取全游唯一的 Resolver 实例
+    -- ===============================================
+    local def_resolver_class = {
+        effect = EffectResolver,
+        skill = SkillResolver,
+        state = StateResolver
+    }
+    local def_resolvers = {}
+    for key, resolver_class in pairs(def_resolver_class) do
+        def_resolvers[key] = ResolverRegistry.Get(key)
+        if not def_resolvers[key] then
+            def_resolvers[key] = resolver_class()
+            ResolverRegistry.Register(key, def_resolvers[key])
+        end
+    end
+
+    -- ===============================================
+    -- 3. 解析配置包 (Defs) -> 汇入全局池
+    -- ===============================================
+    local defs = config.defs
+    local raw_skill_data = nil
+    local default_state = "default"
+
+    if defs then
+        if type(defs.effect) == "string" then
+            local effect_data = require(defs.effect)
+            if effect_data then
+                def_resolvers.effect:AddDefs(effect_data)
+                log.debug("[Manager] Appended effects to global pool from '%s'.", defs.effect)
             end
         end
 
-        if profile_data.state then
-            local state_data = require(profile_data.state)
-            if type(state_data) == "table" and next(state_data) then
-                -- 【优化】：在生成 Resolver 之前，先混入 config 的默认 triggers
-                if profile_data.default and profile_data.default.triggers then
-                    MergeDefaultTriggers(state_data, profile_data.default.triggers)
-                end
-
-                profile_resolvers.state = StateResolver(state_data)
-
-                for _, state_def in pairs(state_data) do
-                    if state_def.triggers and state_def.triggers.actions then
-                        for action_id, _ in pairs(state_def.triggers.actions) do
-                            HookActionForSkill(action_id)
-                        end
-                    end
-                end
+        if type(defs.skill) == "string" then
+            raw_skill_data = require(defs.skill)
+            if raw_skill_data then
+                def_resolvers.skill:AddDefs(raw_skill_data)
+                log.debug("[Manager] Appended skills to global pool from '%s'.", defs.skill)
             end
         end
 
-        if profile_data.prefabs and type(profile_data.prefabs) == "table" then
-            for _, prefab_name in ipairs(profile_data.prefabs) do
-                ResolverRegistry.Register(prefab_name, profile_resolvers)
+        if defs.state then
+            def_resolvers.state:AddStateConfig(defs.state, raw_skill_data)
+            log.debug("[Manager] Appended states to global pool.")
 
-                mod_env.AddPrefabPostInit(prefab_name, function(inst)
-                    inst:DoTaskInTime(0, function()
-                        if not TheNet:IsDedicated() and inst == ThePlayer then
-                            local indicator = SpawnPrefab("nikki_range_indicator")
-                            indicator:Attach(inst)
-                        end
+            if type(defs.state) == "table" and defs.state.default then
+                default_state = defs.state.default
+            end
+        end
+    end
+
+    -- ===============================================
+    -- 4. 装配分发 (Apply To)
+    -- ===============================================
+    local apply_to = config.apply_to or {}
+
+    for tier_name, tier_cfg in pairs(apply_to) do
+        if type(tier_cfg) == "table" then
+            -- 按 prefabs 精准注册
+            if type(tier_cfg.prefabs) == "table" then
+                for _, prefab in ipairs(tier_cfg.prefabs) do
+                    mod_env.AddPrefabPostInit(prefab, function(inst)
+                        ApplyFrameworkToInst(inst, tier_name, default_state, config.custom_resources)
+                        log.debug("[Manager] Prefab PostInit (%s) completed for '%s'", tier_name, prefab)
                     end)
-                    if not TheWorld.ismastersim then return end
+                end
+            end
 
-                    local core_components = {
-                        "nikki_skill",
-                        "nikki_skill_trigger",
-                        "nikki_skillwheel",
-                        "nikki_state"
-                    }
-                    for _, comp_name in ipairs(core_components) do
-                        if not inst.components[comp_name] then
-                            inst:AddComponent(comp_name)
-                        end
-                    end
-
-                    if profile_resolvers.skill then
-                        inst.components.nikki_skill:SetResolver(profile_resolvers.skill)
-                    end
-
-                    if profile_resolvers.state then
-                        local default_state = profile_data.default and profile_data.default.state or "default"
-                        inst.components.nikki_state:Init(profile_resolvers.state, default_state)
-                    end
-
-                    if profile_data.default and profile_data.default.skills then
-                        inst.components.nikki_skill:AddSkills(profile_data.default.skills)
+            -- 按单一 tag 泛型注册
+            if type(tier_cfg.tag) == "string" then
+                local tag_name = tier_cfg.tag
+                mod_env.AddPrefabPostInitAny(function(inst)
+                    if inst.HasTag and inst:HasTag(tag_name) then
+                        ApplyFrameworkToInst(inst, tier_name, default_state, config.custom_resources)
                     end
                 end)
             end

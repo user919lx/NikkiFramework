@@ -1,8 +1,29 @@
+-- scripts/resolvers/base_resolver.lua
+local log = require("utils/log")
+
 local BaseResolver = Class(function(self, defs)
-    -- defs 是由 Manager 在初始化时传递进来的、经过彻底编译合并的纯净数据表
-    self.defs = defs or {}
+    self.defs = {}
+    if defs then 
+        self:AddDefs(defs) 
+    end
 end)
 
+-- 增量合并接口：多 Mod 调用此接口将自己的定义汇入全局池
+function BaseResolver:AddDefs(new_defs)
+    if not new_defs or type(new_defs) ~= "table" then return end
+    for id, def in pairs(new_defs) do
+        if self.defs[id] ~= nil then
+            log.warn("[NikkiFramework] Conflict: ID '%s' already registered! Skipping later definition.", tostring(id))
+        else
+            self.defs[id] = def
+            self:OnDefAdded(id, def) -- 触发子类的钩子进行局部预编译
+        end
+    end
+end
+
+-- 子类重写此钩子，在局部挂载时执行各自的解析逻辑
+function BaseResolver:OnDefAdded(id, def)
+end
 
 -- 基础查表接口 O(1)
 function BaseResolver:GetDef(id)
