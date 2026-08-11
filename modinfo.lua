@@ -4,7 +4,7 @@
 -- ============================================================================
 
 name = "暖暖框架 (Nikki Framework)"
-version = "1.0.0"
+version = "1.0.1"
 local mod_desc = [[为《饥荒：联机版》Mod 开发者提供方便的技能高效的系统
 通过本框架可用配置表的形式，快速添加持续效果，触发技能和状态组合
 框架自身可帮助管理资源和属性变化，让你不再需要自己手动管理效果、技能、状态的生命周期和现场清理
@@ -25,6 +25,11 @@ api_version = 10
 dst_compatible = true
 all_clients_require_mod = true
 
+icon_atlas = "modicon.xml"
+icon = "modicon.tex"
+
+priority = 9999
+
 configuration_options = {
     {
         name = "debug_mode",
@@ -37,3 +42,4 @@ configuration_options = {
         default = false,
     },
 }
+
