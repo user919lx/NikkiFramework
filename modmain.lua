@@ -41,7 +41,7 @@ if not GLOBAL.TheNet:IsDedicated() then
         if not self.owner:HasTag("nikki_framework") then return end
         -- 可调参数
         local DEFAULT_BADGE_SPACING = 62 -- 默认徽章间距
-        local VERTICAL_MARGIN = 13        -- 徽章底部到按钮的边距（逻辑像素）
+        local VERTICAL_MARGIN = 52        -- 徽章底部到按钮的边距（逻辑像素）
 
         -- 私有成员
         self._nikki_badges = {}
@@ -148,24 +148,7 @@ if not GLOBAL.TheNet:IsDedicated() then
             -- 需要显示 → 确保按钮已创建
             self:_Nikki_EnsureRangeButton()
             local _, start_x, y = self:_Nikki_CalcLayoutParams()
-
-            -- 获取原生徽章的高度（优先使用 brain，因为它在所有模式下都存在）
-            local badge_height = 80
-            local native_badge = self.brain
-            if native_badge then
-                local anim_widget = native_badge.anim or native_badge.circular_meter
-                if anim_widget and anim_widget.GetBoundingBoxSize then
-                    local w, h = anim_widget:GetBoundingBoxSize()
-                    if h and h > 0 then
-                        badge_height = h
-                    end
-                end
-            end
-            local hud_scale = TheFrontEnd:GetHUDScale() or 1
-            -- 垂直偏移 = 半高 + 边距 * hud_scale
-            local offset = badge_height / 2 + VERTICAL_MARGIN * hud_scale
-
-            self._nikki_range_btn:SetPosition(start_x, y - offset, 0)
+            self._nikki_range_btn:SetPosition(start_x, y - VERTICAL_MARGIN, 0)
             self._nikki_range_btn:Show()
         end
 
