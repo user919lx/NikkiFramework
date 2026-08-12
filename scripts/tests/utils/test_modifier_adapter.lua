@@ -22,14 +22,14 @@ return function()
     inst.components.locomotor.RemoveExternalSpeedMultiplier = function(self, owner, src) spd_mod = 1 end
 
     -- B. 测试 Apply 叠加计算 (绝对倍率公式: 1 + value * layers)
-    ModifierAdapter.Apply(inst, "atk", 0.5, "test_src", 2)
+    ModifierAdapter.Apply(inst, "atk", 0.5, "test_src")
     suite:assert(atk_mod == 2.0, "Atk 修饰器层数叠加正确 (1 + 0.5 * 2 = 2.0)")
 
     -- 修复点：键名改为 "dmg_taken"，期望结果为 1 + (-0.25 * 3) = 0.25
-    ModifierAdapter.Apply(inst, "dmg_taken", -0.25, "test_src", 3)
+    ModifierAdapter.Apply(inst, "dmg_taken", -0.25, "test_src")
     suite:assert(def_mod == 0.25, "DmgTaken 修饰器层数叠加正确 (1 - 0.25 * 3 = 0.25)")
 
-    ModifierAdapter.Apply(inst, "spd", 0.2, "test_src", 1)
+    ModifierAdapter.Apply(inst, "spd", 0.2, "test_src")
     suite:assert(spd_mod == 1.2, "Spd 修饰器基础值转换正确 (1 + 0.2 = 1.2)")
 
     -- C. 测试不支持的类型拦截
