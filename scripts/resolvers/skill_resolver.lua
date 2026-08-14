@@ -2,6 +2,7 @@
 local BaseResolver = require("resolvers/base_resolver")
 local log = require("utils/log")
 local ResourceAdapter = require("utils/resource_adapter")
+local nikki_util = require("utils/nikki_util")  -- 复用现有工具函数
 
 local SG_STATE_MAP = {
     ["book"] = { "book" },
@@ -27,14 +28,78 @@ local function GetCasterOwner(inst)
     return not TheWorld.ismastersim and ThePlayer or nil
 end
 
+-- ============================================================
+-- Toggle 辅助函数
+-- ============================================================
+local function GenerateToggleEffectId(skill_id)
+    return "_skill_toggle_" .. skill_id
+end
+
+
 local SkillResolver = Class(BaseResolver, function(self, defs)
     self.compiled_wheels = {}
     self.child_skill_ids = {}
     BaseResolver._ctor(self, defs)
 end)
 
+-- ============================================================
+-- Toggle 预处理：只读遍历，返回两个 table，不修改传入数据
+-- ============================================================
+function SkillResolver:PreprocessToggles(raw_skill_data)
+    if not raw_skill_data or type(raw_skill_data) ~= "table" then
+        return {}, {}
+    end
+
+    -- Table A: [skill_id] = effect_id (字符串 toggle)
+    local string_toggle_map = {}
+
+    -- Table B: [effect_id] = effect_def (内联 toggle)
+    local inline_effect_defs = {}
+
+    for skill_id, def in pairs(raw_skill_data) do
+        if def.toggle then
+            if type(def.toggle) == "string" then
+                string_toggle_map[skill_id] = def.toggle
+            elseif type(def.toggle) == "table" then
+                local effect_id = GenerateToggleEffectId(skill_id)
+                local effect_def = def.toggle
+                effect_def.stack = { mode = "toggle" }
+                inline_effect_defs[effect_id] = effect_def
+            else
+                log.error("[SkillResolver] Skill '%s' has invalid toggle type: expected string or table. Skipping.",
+                    skill_id)
+            end
+        end
+    end
+
+    return string_toggle_map, inline_effect_defs
+end
+
 -- 预编译
 function SkillResolver:OnDefAdded(skill_id, def)
+    -- ============================================================
+    -- Toggle 语法糖处理：生成 fn，忽略原有 fn
+    -- ============================================================
+    if def.toggle then
+        local effect_id
+
+        if type(def.toggle) == "string" then
+            effect_id = def.toggle
+        elseif type(def.toggle) == "table" then
+            effect_id = GenerateToggleEffectId(skill_id)
+        else
+            log.error("[SkillResolver] Skill '%s' has invalid toggle type. Skipping.", skill_id)
+            return
+        end
+
+        -- 生成切换 fn，覆盖原有 fn（如果有）
+        def.fn = function(inst, params, def)
+            nikki_util.ApplyEffect(inst, effect_id, inst)
+        end
+        -- 清理 toggle 字段，避免后续误用
+        def.toggle = nil
+    end
+
     -- 语法糖处理
     if def.default_triggers then
         for t_type, t_dict in pairs(def.default_triggers) do

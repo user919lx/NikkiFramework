@@ -130,6 +130,27 @@ function NikkiFrameworkManager.Init(config, mod_env)
         if type(defs.skill) == "string" then
             raw_skill_data = require(defs.skill)
             if raw_skill_data then
+                -- ========================================================
+                -- Toggle 预处理
+                -- ========================================================
+                -- 1. 调用 SkillResolver 预处理，返回两个 table
+                local string_toggle_map, inline_effect_defs = def_resolvers.skill:PreprocessToggles(raw_skill_data)
+
+                -- 2. 遍历 string_toggle_map，检查 effect 是否存在，不存在则删除对应的 skill
+                for skill_id, effect_id in pairs(string_toggle_map) do
+                    if not def_resolvers.effect:GetDef(effect_id) then
+                        log.error("[Manager] Skill '%s' references non-existent effect '%s'. Skill removed.", skill_id, effect_id)
+                        raw_skill_data[skill_id] = nil
+                    end
+                end
+
+                -- 3. 注册内联 toggle 生成的 effect defs
+                if next(inline_effect_defs) then
+                    def_resolvers.effect:AddDefs(inline_effect_defs)
+                    log.debug("[Manager] Registered %d auto-generated toggle effects.", GetTableSize(inline_effect_defs))
+                end
+
+                -- 4. 注册处理后的 Skill Defs
                 def_resolvers.skill:AddDefs(raw_skill_data)
                 log.debug("[Manager] Appended skills to global pool from '%s'.", defs.skill)
             end
