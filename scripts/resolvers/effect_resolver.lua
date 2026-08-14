@@ -137,13 +137,10 @@ function EffectResolver:OnUpdateEffect(inst, id, dt, context, layers)
     local def = self:GetDef(id)
     if not def then return false end
 
-    -- 【核心修改】：验资阶段，引入 on_deplete 耗尽策略
+    -- 验资阶段，引入 on_deplete 耗尽策略
     if def.drain and def.drain.res and context and context.drain_rate and context.drain_rate > 0 then
         local current = ResourceAdapter.GetCurrent(inst, def.drain.res)
         if current <= 0.01 then
-            -- 标记上下文，供 def.fn 读取并做特殊处理（比如没血了动作变慢）
-            context.is_depleted = true
-
             -- 读取耗尽策略，默认为移除
             local on_deplete = def.drain.on_deplete or "remove"
             if on_deplete == "remove" then
@@ -152,6 +149,8 @@ function EffectResolver:OnUpdateEffect(inst, id, dt, context, layers)
                 return false
             end
             -- 如果配置了 "keep"，则放行，不强制 return false
+            -- 标记上下文，供 def.fn 读取并做特殊处理（比如没血了动作变慢）
+            context.is_depleted = true
         else
             -- 资源健康，取消枯竭标记
             context.is_depleted = false
