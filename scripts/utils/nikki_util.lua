@@ -1,5 +1,6 @@
 -- scripts/utils/nikki_util.lua
 local log = require("utils/log")
+local ResolverRegistry = require("nikki_resolver_registry") -- 新增
 
 -- =============================================
 -- 效果施加
@@ -26,6 +27,35 @@ local function ApplyEffect(target, effect_id, source)
 
     return effect_comp:Apply(effect_id, source)
 end
+
+
+local function ToggleEffectLayered(inst, effect_id, remove_all, source)
+    local effect_comp = inst.components.nikki_effect
+    if not effect_comp then return false end
+
+    -- 从 EffectResolver 获取 max
+    local resolver = ResolverRegistry.Get("effect")
+    if not resolver then return false end
+    local _, max, _, _ = resolver:GetEffectConfig(effect_id)
+    if not max or max <= 1 then
+        -- 退化为普通 toggle
+        if effect_comp:HasEffect(effect_id) then
+            effect_comp:Remove(effect_id, true)
+            return true
+        else
+            return effect_comp:Apply(effect_id, source or inst)
+        end
+    end
+    local layers = effect_comp:GetLayers(effect_id)
+    if layers >= max then
+        effect_comp:Remove(effect_id, remove_all ~= false)
+        return true
+    else
+        return effect_comp:Apply(effect_id, source or inst)
+    end
+end
+
+
 
 -- =============================================
 -- 玩家动作执行（模拟鼠标点击）
@@ -114,4 +144,5 @@ return {
     PerformClickAction = PerformClickAction,
     PerformRightClickAction = PerformRightClickAction,
     PerformLeftClickAction = PerformLeftClickAction,
+    ToggleEffectLayered = ToggleEffectLayered
 }
