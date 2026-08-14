@@ -16,18 +16,18 @@ local function on_max_range(self, max_range)
 end
 
 local NikkiSkill = Class(function(self, inst)
-    self.inst = inst
-    self.max_range = 0
-    self._active_skills = {}
-    self._resolver = nil -- 私有缓存
+        self.inst = inst
+        self.max_range = 0
+        self._active_skills = {}
+        self._resolver = nil -- 私有缓存
 
-    -- 存储技能冷却的到期时间戳 [skill_id] = expire_time
-    self._cooldowns = {}
-end,
-nil,
-{
-    max_range = on_max_range
-})
+        -- 存储技能冷却的到期时间戳 [skill_id] = expire_time
+        self._cooldowns = {}
+    end,
+    nil,
+    {
+        max_range = on_max_range
+    })
 
 function NikkiSkill:IsAdded(skill_id)
     for _, id in ipairs(self._active_skills) do if id == skill_id then return true end end
@@ -54,8 +54,8 @@ function NikkiSkill:AddSkills(ids)
         if not self:IsAdded(id) then
             resolver:OnSkillAdd(self.inst, id)
             table.insert(self._active_skills, id)
-            log.debug("[NikkiSkill] Added skill '%s' to %s. Current skills: %s", tostring(id), tostring(self.inst),
-                table.concat(self._active_skills, ", "))
+            log.debug("[NikkiSkill] Added skill '%s' to %s.", tostring(id), tostring(self.inst)
+            )
         end
     end
     self:_UpdateRangeRadius()
@@ -71,8 +71,7 @@ function NikkiSkill:RemoveSkills(ids)
             for i, existing_id in ipairs(self._active_skills) do
                 if existing_id == id then
                     table.remove(self._active_skills, i)
-                    log.debug("[NikkiSkill] Removed skill '%s' from %s. Current skills: %s", tostring(id), tostring(self.inst),
-                        table.concat(self._active_skills, ", "))
+                    log.debug("[NikkiSkill] Removed skill '%s' from %s.", tostring(id), tostring(self.inst))
                     break
                 end
             end
