@@ -17,10 +17,11 @@ Effect 代表**持续影响的能力**——移速加成、属性修改、周期
 | `regen` | table | 否 | 资源回复 |
 | `cost` | table | 否 | 激活时一次性消耗 |
 | `bind_to_state` | boolean | 否 | 是否绑定state，默认false，若为true则切换state后移除 |
+| `aura` | table | 否 | 范围光环配置，周期性扫描并作用于范围内实体 |
 | `on_apply` | function | 否 | 激活时回调 |
 | `on_remove` | function | 否 | 移除时回调 |
 | `on_layer_update` | function | 否 | 层数变化时回调 |
-| `fn` | function | 否 | 每帧回调 |
+| `fn` | function | 否 | 每帧回调，当`aura`参数存在时，自动忽略本参数 |
 
 
 可在 def 中自定义字段，在回调函数中通过 `def` 参数访问。
@@ -141,7 +142,79 @@ cost = { res = "sanity", amount = 10 }
 
 `true` 时，切换 State 自动移除该 Effect；`false`（默认）则不受 State 切换影响。
 
+## aura（光环）
 
+光环是一种特殊的 Effect：它不依赖于每帧连续计算，而是以“脉冲扫描 + 差集判断”的方式周期性处理范围内实体。把其配置收敛到 `def.aura` 下，可以让通用的 `duration / stack / cost / bind_to_state` 等生命周期字段继续复用，同时把高频扫描和目标判定逻辑从普通 `fn` 中剥离出来。
+
+### aura 字段概览
+
+| 字段 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `radius` | number | 是 | 光环作用半径（DST 世界单位） |
+| `pulse_interval` | number | 否 | 脉冲间隔（秒），默认 `1.0` |
+| `exclude_owner` | boolean | 否 | 是否排除施法者自身，默认 `false` |
+| `selector` | table | 否 | 目标筛选条件，见下表 |
+| `on_enter` | function | 否 | 目标进入范围时回调 |
+| `on_pulse` | function | 否 | 每次脉冲时回调，对当前目标执行 |
+| `on_leave` | function | 否 | 目标离开范围时回调 |
+
+### selector
+
+`selector` 采用“与（AND）”逻辑，细化为三类判定：
+
+| 字段 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `must_have` | string[] | 否 | 目标必须拥有全部这些标签 |
+| `must_have_one_of` | string[] | 否 | 目标必须至少拥有其中一个标签 |
+| `cant_have` | string[] | 否 | 目标不能拥有任意一个标签 |
+
+也就是说，目标只有在同时满足：
+
+- `must_have` 中全部存在
+- `must_have_one_of` 中至少一个存在（若表非空）
+- `cant_have` 中全部不存在
+
+时，才会被纳入该光环的有效目标列表。
+
+
+### 回调签名
+
+所有回调统一签名：`function(owner, target, def, context)`
+
+- `owner`：施法者 / 光环拥有者
+- `target`：被影响目标
+- `def`：当前 Effect 完整定义表（只读）
+- `context`：Effect运行时上下文（可读写，用于保存临时状态）（光环激活期间，会记录当前pulse的有效目标总数`target_count`
+
+```lua
+-- 典型的光环定义
+return {
+    my_healing_aura = {
+        duration = 10,
+        stack = { max = 1 },
+        cost = { res = "sanity", amount = 10 },
+        aura = {
+            radius = 8,
+            pulse_interval = 1.0,
+            exclude_owner = true,
+            selector = {
+                must_have = { "_combat" },
+                must_have_one_of = { "monster", "prey", "boss" },
+                cant_have = { "playerghost", "dead" },
+            },
+            on_enter = function(owner, target, def, context)
+                -- 目标进入光环时播放效果
+            end,
+            on_pulse = function(owner, target, def, context)
+                -- 周期性施加治疗/伤害/状态
+            end,
+            on_leave = function(owner, target, def, context)
+                -- 目标离开光环时清理效果
+            end,
+        },
+    },
+}
+```
 
 ## 回调函数
 
