@@ -43,7 +43,7 @@ local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resou
             end
         end
     end
-
+    if not inst.components.nikki_effect then inst:AddComponent("nikki_effect") end
     if not inst.components.nikki_skill then inst:AddComponent("nikki_skill") end
     if not inst.components.nikki_skill_trigger then inst:AddComponent("nikki_skill_trigger") end
     if not inst.components.nikki_state then inst:AddComponent("nikki_state") end
