@@ -1,6 +1,7 @@
 -- scripts/components/nikki_effect.lua
 local ResolverRegistry = require("nikki_resolver_registry")
 local log = require("utils/log")
+local TimerScheduler = require("utils/timer_scheduler") -- 新增
 
 -- 私有懒加载：首次调用时向注册表查一次并缓存到 self._resolver，后续直接读缓存
 local function GetResolver(self)
@@ -14,17 +15,17 @@ local NikkiEffect = Class(function(self, inst)
     self.inst = inst
     self._active_effects = {}
     self._resolver = nil
+    self._scheduler = TimerScheduler(inst) -- 创建调度器
 
     self.inst:ListenForEvent("death", function()
         log.debug("[NikkiEffect] %s died, clearing all active effects.", tostring(self.inst))
         self:Clear()
     end)
 
-    -- 【新增】：监听 State 变化事件，精准清理绑定效果
+    -- 监听 State 变化事件，精准清理绑定效果
     self.inst:ListenForEvent("nikki_state_dirty", function(owner, data)
         local new_state = data and data.state
         local to_remove = {}
-        -- 先收集需要清理的 id，防止在迭代器中直接修改 table 导致报错
         for id, active in pairs(self._active_effects) do
             if active.context.bound_state and active.context.bound_state ~= new_state then
                 table.insert(to_remove, id)
@@ -38,20 +39,6 @@ local NikkiEffect = Class(function(self, inst)
 
     self.inst:StartUpdatingComponent(self)
 end)
-
--- 内部方法：添加定时器与时间队列
-function NikkiEffect:_AddTimer(id, duration, active_ref)
-    if not duration or duration <= 0 then return end
-
-    local end_time = GetTime() + duration
-    local task = self.inst:DoTaskInTime(duration, function()
-        self:Remove(id, false)
-    end)
-
-    -- 严格同步：定时器与时间戳队列同时入栈
-    table.insert(active_ref.timers, task)
-    table.insert(active_ref.context.end_times, end_time)
-end
 
 function NikkiEffect:HasEffect(id)
     return self._active_effects[id] ~= nil
@@ -77,44 +64,52 @@ function NikkiEffect:Apply(id, source)
     local active = self._active_effects[id]
     log.debug("[NikkiEffect] Applying effect '%s' on %s (duration: %s, max: %d, mode: %s)", tostring(id),
         tostring(self.inst), tostring(duration), max, mode)
-    -- 情况 A：首次挂载 (从 0 到 1，需要支付启动成本)
+
+    -- 情况 A：首次挂载
     if not active then
-        -- 【激活验资】：检查并扣除单次启动费用 (cost)
         if not resolver:PayActivationCost(self.inst, id) then
             return false
         end
 
+        local context = {
+            layer = 1,
+            start_time = GetTime(),
+            end_times = {},
+            source = source,
+            data = {},
+            max = max,
+            bound_state = (bind_to_state and self.inst.components.nikki_state) and
+                self.inst.components.nikki_state:GetState() or nil,
+            GetTotalRemain = function(ctx)
+                if #ctx.end_times == 0 then return 0 end
+                return math.max(0, ctx.end_times[#ctx.end_times] - GetTime())
+            end,
+            GetNextRemain = function(ctx)
+                if #ctx.end_times == 0 then return 0 end
+                return math.max(0, ctx.end_times[1] - GetTime())
+            end
+        }
+
         self._active_effects[id] = {
             layers = 1,
-            timers = {},
-            context = {
-                layer = 1,
-                start_time = GetTime(),
-                end_times = {},  -- 时间队列 (先进先出)
-                source = source, -- 记录施法者，解决伤害归属
-                data = {},       -- 留给开发者的状态机黑盒
-                max = max,       -- 顺手把上限传进去
-                bound_state = (bind_to_state and self.inst.components.nikki_state) and
-                    self.inst.components.nikki_state:GetState() or nil,
-                -- 供开发者在 fn 中直接获取剩余时间
-                GetTotalRemain = function(ctx)
-                    if #ctx.end_times == 0 then return 0 end
-                    return math.max(0, ctx.end_times[#ctx.end_times] - GetTime())
-                end,
-                GetNextRemain = function(ctx)
-                    if #ctx.end_times == 0 then return 0 end
-                    return math.max(0, ctx.end_times[1] - GetTime())
-                end
-            }
+            context = context,
         }
         active = self._active_effects[id]
 
         resolver:OnEffectStart(self.inst, id, active.context)
         resolver:UpdateEffectLayers(self.inst, id, 1, active.context)
-        self:_AddTimer(id, duration, active) -- 传入 active 本身
+
+        -- 使用调度器管理到期
+        if duration and duration > 0 then
+            table.insert(active.context.end_times, GetTime() + duration)
+            self._scheduler:Schedule(id, duration, function()
+                self:Remove(id, false) -- 移除一层
+            end)
+        end
         return true
     end
-    -- 情况 B：已经存在，处理叠加与开关规则 (从 1 往后走，跳过启动成本)
+
+    -- 情况 B：已存在，处理叠加模式
     if mode == "toggle" then
         self:Remove(id, true)
         return true
@@ -123,35 +118,67 @@ function NikkiEffect:Apply(id, source)
             tostring(self.inst))
         return false
     elseif mode == "refresh" then
-        -- 刷新：清除所有旧定时器与旧时间戳
-        for _, t in ipairs(active.timers) do t:Cancel() end
-        active.timers = {}
-        active.context.end_times = {} -- 必须同步清空
-        self:_AddTimer(id, duration, active)
+        -- 刷新：重置所有层的时间
+        -- 清空所有待处理的定时器，然后重新添加所有层的时间
+        self._scheduler:Cancel(id)
+        active.context.end_times = {}
+        -- 为每一层重新设定到期时间（假设所有层都刷新到新的 duration）
+        for i = 1, active.layers do
+            table.insert(active.context.end_times, GetTime() + duration)
+        end
+        -- 调度新的定时器（使用最后一个到期时间，因为所有层同时刷新，所以所有层同时到期）
+        if duration and duration > 0 then
+            self._scheduler:Schedule(id, duration, function()
+                self:Remove(id, false)
+            end)
+        end
         return true
     elseif mode == "add" then
-        -- 叠加：独立计算当前这层的时间
+        -- 叠加：增加一层
         if active.layers < max then
             active.layers = active.layers + 1
             active.context.layer = active.layers
             resolver:UpdateEffectLayers(self.inst, id, active.layers, active.context)
-            self:_AddTimer(id, duration, active)
-        else
-            -- 达到上限时：剔除最老的一层 (严格同步剔除 Task 和 end_times)
-            if #active.timers > 0 then
-                local oldest_timer = table.remove(active.timers, 1)
-                table.remove(active.context.end_times, 1) -- 严格同步出栈
-                if oldest_timer then oldest_timer:Cancel() end
+            if duration and duration > 0 then
+                table.insert(active.context.end_times, GetTime() + duration)
+                -- 重新调度，因为新层可能比现有层更早到期
+                -- 取消旧定时器，重新计算最近到期时间
+                self._scheduler:Cancel(id)
+                self:_ScheduleEffect(id)
             end
-            self:_AddTimer(id, duration, active)
+        else
+            -- 达到上限：替换最老的一层（FIFO）
+            if #active.context.end_times > 0 then
+                table.remove(active.context.end_times, 1)
+            end
+            if duration and duration > 0 then
+                table.insert(active.context.end_times, GetTime() + duration)
+                self._scheduler:Cancel(id)
+                self:_ScheduleEffect(id)
+            end
         end
         return true
     end
 end
 
+-- 内部辅助：为某个 effect 调度定时器（基于其最近的到期时间）
+function NikkiEffect:_ScheduleEffect(id)
+    local active = self._active_effects[id]
+    if not active or #active.context.end_times == 0 then return end
+    local nearest = math.min(unpack(active.context.end_times))
+    local duration = math.max(0, nearest - GetTime())
+    if duration > 0 then
+        self._scheduler:Schedule(id, duration, function()
+            self:Remove(id, false)
+        end)
+    else
+        self:Remove(id, false)
+    end
+end
+
 -- ============================================
 -- 公开 API：移除 Effect
--- force_all: true 则直接清空所有层数，false 则按层递减
+-- force_all: true 直接清空所有层数，false 按层递减
 -- ============================================
 function NikkiEffect:Remove(id, force_all)
     local resolver = GetResolver(self)
@@ -159,33 +186,37 @@ function NikkiEffect:Remove(id, force_all)
 
     local active = self._active_effects[id]
 
-    -- 取消最早的一个定时器
-    if not force_all and #active.timers > 0 then
-        local timer = table.remove(active.timers, 1)
-        table.remove(active.context.end_times, 1) -- 严格同步出栈
-        if timer then timer:Cancel() end
+    if not force_all then
+        -- 移除最老的一层 (FIFO)
+        if #active.context.end_times > 0 then
+            table.remove(active.context.end_times, 1)
+        end
+        active.layers = active.layers - 1
+    else
+        -- 清空所有层
+        active.context.end_times = {}
+        active.layers = 0
     end
 
-    local target_layer = force_all and 0 or (active.layers - 1)
-
-    if target_layer > 0 then
-        -- 还有剩余层数，仅降级
-        active.layers = target_layer
-        active.context.layer = target_layer
-        resolver:UpdateEffectLayers(self.inst, id, target_layer, active.context)
-        log.debug("[NikkiEffect] Effect '%s' on %s reduced to %d layers.", tostring(id), tostring(self.inst),
-            target_layer)
-    else
-        -- 层数归零，彻底注销
-        for _, t in ipairs(active.timers) do t:Cancel() end
+    if active.layers <= 0 then
+        -- 完全移除
+        self._scheduler:Cancel(id)
         resolver:OnEffectEnd(self.inst, id, active.context)
         self._active_effects[id] = nil
         log.debug("[NikkiEffect] Effect '%s' on %s fully removed.", tostring(id), tostring(self.inst))
+    else
+        -- 剩余层，更新层数并重新调度定时器
+        active.context.layer = active.layers
+        resolver:UpdateEffectLayers(self.inst, id, active.layers, active.context)
+        self._scheduler:Cancel(id)
+        self:_ScheduleEffect(id)
+        log.debug("[NikkiEffect] Effect '%s' on %s reduced to %d layers.", tostring(id), tostring(self.inst),
+            active.layers)
     end
 end
 
 -- ============================================
--- 公开 API：查询 Effect 是否为永久效果（无 duration）
+-- 公开 API：查询 Effect 是否为永久效果
 -- ============================================
 function NikkiEffect:IsPermanent(id)
     local resolver = GetResolver(self)
@@ -206,35 +237,31 @@ end
 -- 清空所有激活的 Effect
 -- ============================================
 function NikkiEffect:Clear()
-    local active_ids = {}
-    for id, _ in pairs(self._active_effects) do
-        table.insert(active_ids, id)
+    self._scheduler:Clear()
+    for id, active in pairs(self._active_effects) do
+        local resolver = GetResolver(self)
+        if resolver then
+            resolver:OnEffectEnd(self.inst, id, active.context)
+        end
     end
-
-    for _, id in ipairs(active_ids) do
-        self:Remove(id, true)
-    end
-
     self._active_effects = {}
 end
 
 -- ============================================
--- 帧更新：处理业务 Tick 与持续扣费卸载
+-- 帧更新：处理业务 Tick 与持续扣费
 -- ============================================
 function NikkiEffect:OnUpdate(dt)
     local resolver = GetResolver(self)
     if not resolver then return end
 
-    -- 安全屏障：实体死亡后停止挂载的 fn 轮询
     if self.inst.components.health and self.inst.components.health:IsDead() then
         return
     end
 
     for id, active in pairs(self._active_effects) do
-        -- 交由 Resolver 处理周期性消耗/回复 (drain) 与 fn，返回 false 时触发自我卸载
         local should_keep = resolver:OnUpdateEffect(self.inst, id, dt, active.context, active.layers)
         if not should_keep then
-            self:Remove(id)
+            self:Remove(id, true)
         end
     end
 end
