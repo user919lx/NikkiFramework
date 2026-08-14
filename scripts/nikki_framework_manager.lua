@@ -10,10 +10,10 @@ local ResourceAdapter = require("utils/resource_adapter")
 -- ========================================================
 -- 组件分层装配工厂
 -- ========================================================
-local TIER_LEVELS = { effect = 1, skill = 2, player = 3 }
+local TIER_LEVELS = { skill = 2, player = 3 }
 
 local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resources)
-    local tier_level = TIER_LEVELS[tier_name] or 1
+    local tier_level = TIER_LEVELS[tier_name] or 0
 
     inst:AddTag("nikki_framework")
 
@@ -28,16 +28,9 @@ local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resou
 
     if not TheWorld.ismastersim then return end
 
-    -- 层级 1: 纯粹的 Effect (受击/状态接收者)
-    -- 此层级不再自动挂载任何自定义资源组件，避免给普通怪物带来不必要的性能开销
-    if not inst.components.nikki_effect then
-        inst:AddComponent("nikki_effect")
-    end
-
     if tier_level < 2 then return end
 
     -- 层级 2: Resources, Skill 与 State (施法者/技能拥有者)
-    -- 只有达到该层级，才需要消耗/回复资源的组件支持
     if custom_resources then
         for res_id, config_data in pairs(custom_resources) do
             if config_data.component and config_data.component.name then
@@ -56,11 +49,8 @@ local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resou
     if not inst.components.nikki_state then inst:AddComponent("nikki_state") end
 
     if inst.components.nikki_state and default_state then
-        -- 缓存默认状态名
         inst.components.nikki_state:SetDefaultState(default_state)
-        -- 延迟 0 帧执行：等待其他核心组件 (如 Health) 的 OnLoad 存档数据灌入完毕
         inst:DoTaskInTime(0, function()
-            -- 如果该实体已经被存档的 OnLoad 接管了状态，或者他处于死亡/鬼魂状态，则放弃强塞 default_state
             if not inst.components.nikki_state:GetState()
                 and not inst:HasTag("playerghost")
                 and not (inst.components.health and inst.components.health:IsDead()) then
@@ -87,7 +77,6 @@ function NikkiFrameworkManager.Init(config, mod_env)
 
     -- ===============================================
     -- 1. 挂载全局扩展层 (Resources & Modifiers)
-    -- 这里仅做全局数据的静态注册，不涉及特定 Prefab 的修改，放最前面无妨
     -- ===============================================
     if config.custom_resources then
         for res_id, config_data in pairs(config.custom_resources) do
@@ -163,7 +152,6 @@ function NikkiFrameworkManager.Init(config, mod_env)
 
     for tier_name, tier_cfg in pairs(apply_to) do
         if type(tier_cfg) == "table" then
-            -- 按 prefabs 精准注册
             if type(tier_cfg.prefabs) == "table" then
                 for _, prefab in ipairs(tier_cfg.prefabs) do
                     mod_env.AddPrefabPostInit(prefab, function(inst)
@@ -173,7 +161,6 @@ function NikkiFrameworkManager.Init(config, mod_env)
                 end
             end
 
-            -- 按单一 tag 泛型注册
             if type(tier_cfg.tag) == "string" then
                 local tag_name = tier_cfg.tag
                 mod_env.AddPrefabPostInitAny(function(inst)
