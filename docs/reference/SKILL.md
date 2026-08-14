@@ -22,6 +22,7 @@ Skill 代表**瞬间影响的能力**——按键触发、事件响应、资源�
 | `tags` | string[] | 否 | 技能添加时挂载、移除时清除的标签，主要用于动作触发判断 |
 | `default_triggers` | table | 否 | 默认触发规则 |
 | `wheel` | table | 否 | 技能轮盘 UI 配置，详见 [SkillWheel手册](./SKILLWHEEL.md) |
+| `toggle` | string / table | 否 | 开关型技能的语法糖，自动生成切换 Effect 的逻辑，与`fn`互斥，优先使用 `toggle` 配置 |
 
 
 ## 回调函数详解
@@ -136,6 +137,36 @@ fn = function(inst, params, def)
     return false
 end,
 ```
+## toggle
+
+开关型技能的语法糖字段。用于快速定义“施放一次开启状态，再施放一次关闭状态”的技能，无需手写 `fn`。
+
+
+### 支持的两种写法
+
+**写法一：字符串**
+
+直接引用一个已存在 Effect 的 ID。框架会在技能释放时自动切换该 Effect 的开关状态。
+此写法要求：被引用的 Effect 必须已经注册，且其叠加模式必须是 `toggle`，否则该技能无法注册。
+
+
+**写法二：内联表**
+
+直接在 Skill 定义中写 Effect 的完整配置。框架会自动将这张表注册为一个 Effect，并自动生成一个唯一的 Effect ID 供内部使用。
+此写法下，`stack`相关参数将被忽略，框架会自动覆盖为 `stack.mode = "toggle"`
+
+
+### 命名规则
+
+当使用内联表写法时，框架自动生成的 Effect ID 格式为：`_skill_toggle_{skill_id}`
+例如：技能 ID 为 `berserk_switch` 时，自动生成的 Effect ID 为 `_skill_toggle_berserk_switch`。
+
+
+### 运行时行为
+首次施放技能时，目标 Effect 被施加到施法者身上，状态变为“开启”。
+再次施放技能时，目标 Effect 从施法者身上被移除，状态变为“关闭”。
+再次施放时，Effect 被重新施加，状态回到“开启”。
+如此循环往复。Effect 自带的 `on_apply` 和 `on_remove` 回调在切换过程中正常触发，不会丢失。
 
 ## default_triggers
 
