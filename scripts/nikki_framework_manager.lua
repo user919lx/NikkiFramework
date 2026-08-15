@@ -90,7 +90,8 @@ function NikkiFrameworkManager.Init(config, mod_env)
 
     if config.custom_modifiers then
         for mod_type, strategy_data in pairs(config.custom_modifiers) do
-            ModifierAdapter.RegisterStrategy(mod_type, strategy_data)
+            -- 传入 mod_env，供策略的 init 函数使用
+            ModifierAdapter.RegisterStrategy(mod_type, strategy_data, mod_env)
         end
     end
 
@@ -139,7 +140,8 @@ function NikkiFrameworkManager.Init(config, mod_env)
                 -- 2. 遍历 string_toggle_map，检查 effect 是否存在，不存在则删除对应的 skill
                 for skill_id, effect_id in pairs(string_toggle_map) do
                     if not def_resolvers.effect:GetDef(effect_id) then
-                        log.error("[Manager] Skill '%s' references non-existent effect '%s'. Skill removed.", skill_id, effect_id)
+                        log.error("[Manager] Skill '%s' references non-existent effect '%s'. Skill removed.", skill_id,
+                            effect_id)
                         raw_skill_data[skill_id] = nil
                     end
                 end
