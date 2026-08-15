@@ -154,6 +154,7 @@ cost = { res = "sanity", amount = 10 }
 | `pulse_interval` | number | 否 | 脉冲间隔（秒），默认 `1.0` |
 | `exclude_owner` | boolean | 否 | 是否排除施法者自身，默认 `false` |
 | `selector` | table | 否 | 目标筛选条件，见下表 |
+| `shader` | string / false | 否 | 光环视觉 Shader。`nil`：使用默认 Shader；`"路径"`：使用指定 Shader；`false`：不生成特效 |
 | `on_enter` | function | 否 | 目标进入范围时回调 |
 | `on_pulse` | function | 否 | 每次脉冲时回调，对当前目标执行 |
 | `on_leave` | function | 否 | 目标离开范围时回调 |

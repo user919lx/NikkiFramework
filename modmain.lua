@@ -6,6 +6,7 @@ end
 PrefabFiles = {
     "nikki_spell_caster",
     "nikki_range_indicator",
+    "nikki_aura_fx",
 }
 AddReplicableComponent("nikki_skill_trigger")
 AddReplicableComponent("nikki_state")

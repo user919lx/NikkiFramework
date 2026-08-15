@@ -125,6 +125,24 @@ local function PerformAuraPulse(inst, def, context)
     context._aura_prev_targets = current_targets
 end
 
+-- ============================================================
+-- 光环特效：创建并挂载
+-- ============================================================
+local function SpawnAuraFx(inst, def, context)
+    local aura = def.aura
+    local fx = SpawnPrefab("nikki_aura_fx")
+    if not fx then return end
+    fx:Attach(inst)
+    fx:SetRange(aura.radius)
+    fx:SetPulseInterval(aura.pulse_interval)
+    if type(aura.shader) == "string" then
+        fx:SetShader(aura.shader)
+    end
+    context._aura_fx = fx
+    return fx
+end
+
+
 local EffectResolver = Class(BaseResolver, function(self, defs)
     BaseResolver._ctor(self, defs)
 end)
@@ -147,11 +165,23 @@ function EffectResolver:OnEffectStart(inst, id, context)
     if not def then return end
     if def.tags then for _, tag in ipairs(def.tags) do inst:AddTag(tag) end end
     if def.on_apply then pcall(def.on_apply, inst, def, context) end
+
+    if def.aura and def.aura.shader ~= false then
+        SpawnAuraFx(inst, def, context)
+    end
 end
+
 
 function EffectResolver:OnEffectEnd(inst, id, context)
     local def = self:GetDef(id)
     if not def then return end
+
+    -- 清理特效
+    if context._aura_fx and context._aura_fx:IsValid() then
+        context._aura_fx:Remove()
+        context._aura_fx = nil
+    end
+
     if def.tags then
         for _, tag in ipairs(def.tags) do inst:RemoveTag(tag) end
     end
