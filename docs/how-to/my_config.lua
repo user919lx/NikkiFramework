@@ -38,6 +38,13 @@ local config = {
     custom_modifiers = {
         -- 防御：利用官方 externalabsorbmodifiers
         ["defense"] = {
+            init = function(env)
+                env.AddComponentPostInit("health", function(inst)
+                    if inst.components.health then
+                        inst.components.health.externalabsorbmodifiers = inst.components.health.externalabsorbmodifiers or {}
+                    end
+                end)
+            end,
             apply = function(inst, val, effect_id)
                 if inst.components.health and inst.components.health.externalabsorbmodifiers then
                     inst.components.health.externalabsorbmodifiers:SetModifier(inst, val, effect_id)

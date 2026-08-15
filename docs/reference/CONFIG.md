@@ -144,15 +144,17 @@ custom_resources = {
 
 ### ModifierStrategy 字段
 
-| 字段     | 类型     | 必填 | 说明                                              |
-| :------- | :------- | :--- | :------------------------------------------------ |
-| `apply`  | function | 是   | `function(inst, val, effect_id)` 应用修改 |
-| `remove` | function | 是   | `function(inst, effect_id)` 移除修改              |
+| 字段     | 类型     | 必填 | 说明                                                                 |
+| :------- | :------- | :--- | :--------------------------------------------------------------------- |
+| `init`   | function | 否   | `function(env)` 在注册时执行一次，适合挂接 mod 级初始化，如 `env.AddComponentPostInit` |
+| `apply`  | function | 是   | `function(inst, val, effect_id)` 应用修改                                |
+| `remove` | function | 是   | `function(inst, effect_id)` 移除修改                                     |
 
 **参数说明**：
 
 | 参数        | 类型   | 说明                                      |
 | :---------- | :----- | :---------------------------------------- |
+| `env`       | table  | mod 对应的环境对象，可调用 `env.AddComponentPostInit` 等 mod API |
 | `inst`      | entity | 目标实体                                  |
 | `val`       | number | 配置表中填写的数值                        |
 | `effect_id` | string | 效果唯一标识，用于移除时匹配              |
@@ -162,6 +164,13 @@ custom_resources = {
 ```lua
 custom_modifiers = {
     ["defense"] = {
+        init = function(env)
+            env.AddComponentPostInit("health", function(inst)
+                if inst.components.health then
+                    inst.components.health.externalabsorbmodifiers = inst.components.health.externalabsorbmodifiers or {}
+                end
+            end)
+        end,
         apply = function(inst, val, effect_id)
             if inst.components.health and inst.components.health.externalabsorbmodifiers then
                 inst.components.health.externalabsorbmodifiers:SetModifier(inst, val, effect_id)
@@ -175,6 +184,8 @@ custom_modifiers = {
     },
 },
 ```
+
+> `init` 会在自定义修饰器注册阶段执行一次，不在每次效果应用时重复触发。它主要用于在 mod 环境里注册全局监听或挂接官方 API。
 
 
 ### 内置修饰器
