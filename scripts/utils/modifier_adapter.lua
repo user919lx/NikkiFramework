@@ -57,6 +57,20 @@ local MODIFIER_STRATEGIES = {
             end
         end
     },
+    -- 免疫昏睡
+    grogginess_immunity = {
+        apply = function(inst, val, key)
+            if val ~= true then return end
+            if inst.components.grogginess then
+                inst.components.grogginess:AddImmunitySource(key)
+            end
+        end,
+        remove = function(inst, key)
+            if inst.components.grogginess then
+                inst.components.grogginess:RemoveImmunitySource(key)
+            end
+        end
+    },
 }
 
 -- 对外开放的注册接口，允许配置字典注入新的属性算法
