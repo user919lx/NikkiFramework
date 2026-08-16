@@ -144,6 +144,7 @@ end
 
 
 local EffectResolver = Class(BaseResolver, function(self, defs)
+    self._resolver_type = "effect"
     BaseResolver._ctor(self, defs)
 end)
 
@@ -225,7 +226,6 @@ function EffectResolver:PayActivationCost(inst, id)
     if not def or not def.cost or not def.cost.res or not def.cost.amount or def.cost.amount <= 0 then
         return true
     end
-
     local current = ResourceAdapter.GetCurrent(inst, def.cost.res)
     if current < def.cost.amount then
         log.debug("[EffectResolver] Activation failed: %s lacks %s for effect '%s'", tostring(inst), def.cost.res, id)

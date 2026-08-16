@@ -66,6 +66,7 @@ end
 -- StateResolver 核心类
 -- ========================================================
 local StateResolver = Class(BaseResolver, function(self, defs)
+    self._resolver_type = "state"
     BaseResolver._ctor(self, defs)
 end)
 

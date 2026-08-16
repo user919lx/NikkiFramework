@@ -37,6 +37,7 @@ end
 
 
 local SkillResolver = Class(BaseResolver, function(self, defs)
+    self._resolver_type = "skill"
     self.compiled_wheels = {}
     self.child_skill_ids = {}
     BaseResolver._ctor(self, defs)
@@ -181,7 +182,7 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
     local is_instant = compiled.instant
 
     local item = {
-        label = compiled.name,
+        label = self:GetDisplayName(skill_id),
         id = skill_id,
         checkenabled = compiled.checkenabled,
         checkcooldown = compiled.checkcooldown,
@@ -295,12 +296,6 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
 
     return item
 end
-
-function SkillResolver:GetSkillDef(id) return self:GetDef(id) end
-
-function SkillResolver:GetAllSkillIds() return self:GetAllIds() end
-
-function SkillResolver:GetSkillName(skill_id) return self:GetDef(skill_id) and self:GetDef(skill_id).name or skill_id end
 
 function SkillResolver:GetSkillRange(skill_id) return self:GetDef(skill_id) and self:GetDef(skill_id).range or nil end
 
