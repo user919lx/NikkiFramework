@@ -220,6 +220,14 @@ function NikkiEffect:_OnEffectEnd(id, context)
     local def = resolver:GetDef(id)
     if not def then return end
 
+    if def.aura and def.aura.on_leave and context._aura_prev_targets then
+        for _, target in ipairs(context._aura_prev_targets) do
+            if target and target:IsValid() then
+                pcall(def.aura.on_leave, self.inst, target, def, context)
+            end
+        end
+    end
+
     if context._aura_fx and context._aura_fx:IsValid() then
         context._aura_fx:Remove()
         context._aura_fx = nil
