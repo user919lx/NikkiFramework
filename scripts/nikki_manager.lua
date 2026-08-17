@@ -104,11 +104,14 @@ function NikkiManager:_InstallTriggerHooks(env)
         return
     end
 
-    -- Action 劫持
+    -- ============================================================
+    -- Action 劫持：拦截 BufferedAction:Do
+    -- ============================================================
     env.AddClassPostConstruct("bufferedaction", function(self)
         local _super_Do = self.Do
         self.Do = function(self)
             local origin_result, origin_reason = _super_Do(self)
+
             if self.doer and self.doer:IsValid() and self.action and self.action.id then
                 local trigger = self.doer.components.nikki_skill_trigger
                 if trigger then
@@ -120,14 +123,17 @@ function NikkiManager:_InstallTriggerHooks(env)
                         invobject = self.invobject,
                         origin_result = origin_result,
                     }
-                    trigger:CastAction(self.action.id, params)
+                    trigger:Trigger("actions", self.action.id, params)
                 end
             end
+
             return origin_result, origin_reason
         end
     end)
 
-    -- Event 劫持
+    -- ============================================================
+    -- Event 劫持：拦截 EntityScript:PushEvent / PushEventImmediate
+    -- ============================================================
     local event_depth = 0
     local MAX_EVENT_DEPTH = 8
 
@@ -145,9 +151,9 @@ function NikkiManager:_InstallTriggerHooks(env)
 
                 event_depth = event_depth + 1
                 xpcall(function()
-                    self.components.nikki_skill_trigger:CastEvent(event, data)
+                    self.components.nikki_skill_trigger:Trigger("events", event, data)
                 end, function(err)
-                    log.error("[NikkiManager] Error in CastEvent for '%s': %s", tostring(event), tostring(err))
+                    log.error("[NikkiManager] Error in Trigger for event '%s': %s", tostring(event), tostring(err))
                 end)
                 event_depth = event_depth - 1
             end
@@ -168,9 +174,10 @@ function NikkiManager:_InstallTriggerHooks(env)
 
                 event_depth = event_depth + 1
                 xpcall(function()
-                    self.components.nikki_skill_trigger:CastEvent(event, data)
+                    self.components.nikki_skill_trigger:Trigger("events", event, data)
                 end, function(err)
-                    log.error("[NikkiManager] Error in CastEvent for immediate '%s': %s", tostring(event), tostring(err))
+                    log.error("[NikkiManager] Error in Trigger for immediate event '%s': %s", tostring(event),
+                        tostring(err))
                 end)
                 event_depth = event_depth - 1
             end
@@ -233,7 +240,6 @@ function NikkiManager:_LoadDefs(config)
                         if toggle_result.effect_def then
                             effect_defs[toggle_result.effect_id] = toggle_result.effect_def
                         end
-                        -- 替换 fn 为 toggle 逻辑
                         def.fn = function(inst, params, def)
                             inst.components.nikki_effect:Toggle(toggle_result.effect_id)
                             return true
@@ -247,24 +253,20 @@ function NikkiManager:_LoadDefs(config)
                     if triggers and next(triggers) then
                         trigger_data[skill_id] = triggers
                     end
-                    -- 子技能已经放入 all_skills 中
                     for sub_id, sub_def in pairs(sub_skills) do
                         all_skills[sub_id] = sub_def
                     end
                 end
             end
 
-            -- 注册 toggle 生成的 Effect
             if next(effect_defs) then
                 self.effect_resolver:AddDefs(effect_defs)
             end
 
-            -- 一次性注册所有技能
             if next(all_skills) then
                 self.skill_resolver:AddDefs(all_skills)
             end
 
-            -- 一次性注册所有 trigger 映射
             if next(trigger_data) then
                 self.trigger_resolver:AddDefs(trigger_data)
             end
@@ -283,7 +285,6 @@ end
 
 -- ============================================================
 -- _ProcessToggle：处理单个技能的 toggle
--- 返回：{ effect_id, effect_def } 或 nil
 -- ============================================================
 function NikkiManager:_ProcessToggle(skill_id, def)
     if not def.toggle then
@@ -305,14 +306,12 @@ end
 
 -- ============================================================
 -- _ProcessDefaultTriggers：处理单个技能的 default_triggers
--- 返回：processed_def（不含 default_triggers），triggers，sub_skills
 -- ============================================================
 function NikkiManager:_ProcessDefaultTriggers(skill_id, def)
     local processed_def = {}
     local triggers = {}
     local sub_skills = {}
 
-    -- 复制除 default_triggers 外的所有字段
     for k, v in pairs(def) do
         if k ~= "default_triggers" then
             processed_def[k] = v
@@ -331,13 +330,11 @@ function NikkiManager:_ProcessDefaultTriggers(skill_id, def)
         local trigger_map = default_triggers[trigger_type]
         if trigger_map then
             for trigger_key, trigger_value in pairs(trigger_map) do
-                -- 记录 trigger 绑定
                 if not triggers[trigger_type] then
                     triggers[trigger_type] = {}
                 end
                 table.insert(triggers[trigger_type], trigger_key)
 
-                -- 只有 function 或 table 才生成子技能
                 if trigger_value ~= true then
                     local sub_skill_id = GenerateSubSkillId(skill_id, trigger_type, trigger_key)
                     local sub_def = self:_BuildSubSkillDef(skill_id, def, trigger_value)
@@ -507,7 +504,7 @@ function NikkiManager:GetTriggerResolver()
 end
 
 -- ============================================================
--- 公开 API
+-- 公开 API：技能
 -- ============================================================
 function NikkiManager:AddSkill(inst, skill_id, source)
     source = source or "dynamic"
@@ -538,6 +535,9 @@ function NikkiManager:ExecuteSkill(inst, skill_id, params)
     return inst.components.nikki_skill:Execute(skill_id, params or {})
 end
 
+-- ============================================================
+-- 公开 API：效果
+-- ============================================================
 function NikkiManager:ApplyEffect(inst, effect_id, source)
     source = source or "dynamic"
     if not inst or not inst.components.nikki_effect then
@@ -557,6 +557,9 @@ function NikkiManager:HasEffect(inst, effect_id)
     return inst.components.nikki_effect:HasEffect(effect_id)
 end
 
+-- ============================================================
+-- 公开 API：状态
+-- ============================================================
 function NikkiManager:SetState(inst, state_id)
     if not inst or not inst.components.nikki_state then return false end
     return inst.components.nikki_state:SetState(state_id)
@@ -567,15 +570,9 @@ function NikkiManager:GetState(inst)
     return inst.components.nikki_state:GetState()
 end
 
-function NikkiManager:RegisterTrigger(inst, trigger_type, key, target_type, target, source)
-    source = source or "dynamic"
-    if not inst or not inst.components.nikki_skill_trigger then
-        log.warn("[NikkiManager] RegisterTrigger: inst has no nikki_skill_trigger component.")
-        return false
-    end
-    return inst.components.nikki_skill_trigger:RegisterTrigger(trigger_type, key, target_type, target, source)
-end
-
+-- ============================================================
+-- 公开 API：查询
+-- ============================================================
 function NikkiManager:GetSkillDef(skill_id)
     return self.skill_resolver and self.skill_resolver:GetDef(skill_id)
 end
@@ -592,6 +589,9 @@ function NikkiManager:GetSkillDisplayName(skill_id)
     return self.skill_resolver and self.skill_resolver:GetDisplayName(skill_id) or skill_id
 end
 
+-- ============================================================
+-- 公开 API：客户端设置
+-- ============================================================
 function NikkiManager:GetSetting(key)
     return self._settings[key]
 end
