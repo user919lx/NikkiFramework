@@ -6,6 +6,20 @@ local StateResolver = Class(BaseResolver, function(self, defs)
     BaseResolver._ctor(self, defs)
 end)
 
+function StateResolver:OnDefAdded(state_name, def)
+    if def.keys then
+        local bindings = {}
+        for k, v in pairs(def.keys) do
+            local key_code = k
+            if type(k) == "string" and rawget(_G, k) ~= nil then
+                key_code = rawget(_G, k)
+            end
+            bindings[key_code] = v
+        end
+        def.keys = bindings
+    end
+end
+
 function StateResolver:GetStateDef(state_name)
     return self:GetDef(state_name) or {}
 end
@@ -22,11 +36,6 @@ end
 function StateResolver:GetSkills(state_name)
     local def = self:GetStateDef(state_name)
     return def and def.skills or {}
-end
-
-function StateResolver:GetKeyBindings(state_name)
-    local def = self:GetStateDef(state_name)
-    return def and def.key_bindings or {}
 end
 
 return StateResolver

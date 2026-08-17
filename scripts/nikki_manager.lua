@@ -115,29 +115,25 @@ function NikkiManager:_InstallTriggerHooks(env)
     -- ============================================================
     -- Action 劫持：拦截 BufferedAction:Do
     -- ============================================================
-    env.AddClassPostConstruct("bufferedaction", function(self)
-        local _super_Do = self.Do
-        self.Do = function(self)
-            local origin_result, origin_reason = _super_Do(self)
-
-            if self.doer and self.doer:IsValid() and self.action and self.action.id then
-                local trigger = self.doer.components.nikki_skill_trigger
-                if trigger then
-                    local params = {
-                        act = self,
-                        target = self.target,
-                        pos = type(self.GetActionPoint) == "function" and self:GetActionPoint() or nil,
-                        doer = self.doer,
-                        invobject = self.invobject,
-                        origin_result = origin_result,
-                    }
-                    trigger:Trigger("actions", self.action.id, params)
-                end
+    local _old_Do = BufferedAction.Do
+    BufferedAction.Do = function(self)
+        local origin_result, origin_reason = _old_Do(self)
+        if self.doer and self.doer:IsValid() and self.action and self.action.id then
+            local trigger = self.doer.components.nikki_skill_trigger
+            if trigger then
+                local params = {
+                    act = self,
+                    target = self.target,
+                    pos = type(self.GetActionPoint) == "function" and self:GetActionPoint() or nil,
+                    doer = self.doer,
+                    invobject = self.invobject,
+                    origin_result = origin_result,
+                }
+                trigger:Trigger("actions", self.action.id, params)
             end
-
-            return origin_result, origin_reason
         end
-    end)
+        return origin_result, origin_reason
+    end
 
     -- ============================================================
     -- Event 劫持：拦截 EntityScript:PushEvent / PushEventImmediate
@@ -145,54 +141,47 @@ function NikkiManager:_InstallTriggerHooks(env)
     local event_depth = 0
     local MAX_EVENT_DEPTH = 8
 
-    env.AddClassPostConstruct("entityscript", function(self)
-        local _super_PushEvent = self.PushEvent
-        self.PushEvent = function(self, event, data)
-            local result = _super_PushEvent(self, event, data)
-
-            if self and self:IsValid() and self.components and self.components.nikki_skill_trigger then
-                if event_depth >= MAX_EVENT_DEPTH then
-                    log.error("[NikkiManager] Event loop detected! Max depth (%d) exceeded for event '%s'.",
-                        MAX_EVENT_DEPTH, tostring(event))
-                    return result
-                end
-
-                event_depth = event_depth + 1
-                xpcall(function()
-                    self.components.nikki_skill_trigger:Trigger("events", event, data)
-                end, function(err)
-                    log.error("[NikkiManager] Error in Trigger for event '%s': %s", tostring(event), tostring(err))
-                end)
-                event_depth = event_depth - 1
+    local _old_PushEvent = EntityScript.PushEvent
+    EntityScript.PushEvent = function(self, event, data)
+        local result = _old_PushEvent(self, event, data)
+        if self and self:IsValid() and self.components and self.components.nikki_skill_trigger then
+            if event_depth >= MAX_EVENT_DEPTH then
+                log.error("[NikkiManager] Event loop detected! Max depth (%d) exceeded for event '%s'.",
+                    MAX_EVENT_DEPTH, tostring(event))
+                return result
             end
 
-            return result
+            event_depth = event_depth + 1
+            xpcall(function()
+                self.components.nikki_skill_trigger:Trigger("events", event, data)
+            end, function(err)
+                log.error("[NikkiManager] Error in Trigger for event '%s': %s", tostring(event), tostring(err))
+            end)
+            event_depth = event_depth - 1
         end
+        return result
+    end
 
-        local _super_PushEventImmediate = self.PushEventImmediate
-        self.PushEventImmediate = function(self, event, data)
-            local result = _super_PushEventImmediate(self, event, data)
-
-            if self and self:IsValid() and self.components and self.components.nikki_skill_trigger then
-                if event_depth >= MAX_EVENT_DEPTH then
-                    log.error("[NikkiManager] Event loop detected! Max depth (%d) exceeded for immediate event '%s'.",
-                        MAX_EVENT_DEPTH, tostring(event))
-                    return result
-                end
-
-                event_depth = event_depth + 1
-                xpcall(function()
-                    self.components.nikki_skill_trigger:Trigger("events", event, data)
-                end, function(err)
-                    log.error("[NikkiManager] Error in Trigger for immediate event '%s': %s", tostring(event),
-                        tostring(err))
-                end)
-                event_depth = event_depth - 1
+    local _old_PushEventImmediate = EntityScript.PushEventImmediate
+    EntityScript.PushEventImmediate = function(self, event, data)
+        local result = _old_PushEventImmediate(self, event, data)
+        if self and self:IsValid() and self.components and self.components.nikki_skill_trigger then
+            if event_depth >= MAX_EVENT_DEPTH then
+                log.error("[NikkiManager] Event loop detected! Max depth (%d) exceeded for immediate event '%s'.",
+                    MAX_EVENT_DEPTH, tostring(event))
+                return result
             end
-
-            return result
+            event_depth = event_depth + 1
+            xpcall(function()
+                self.components.nikki_skill_trigger:Trigger("events", event, data)
+            end, function(err)
+                log.error("[NikkiManager] Error in Trigger for immediate event '%s': %s", tostring(event),
+                    tostring(err))
+            end)
+            event_depth = event_depth - 1
         end
-    end)
+        return result
+    end
 
     self._hooks_installed = true
     log.info("[NikkiManager] Trigger hooks installed.")

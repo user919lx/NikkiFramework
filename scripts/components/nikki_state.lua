@@ -23,7 +23,7 @@ local NikkiState = Class(function(self, inst)
         self._resolver = nil
         self._active_overlay_skills = {}
         self._active_tags = {}
-        self._active_key_bindings = {}
+        self._active_keys = {}
 
         self.inst:ListenForEvent("death", function()
             log.debug("[NikkiState] %s died. Clearing all state overlays.", tostring(self.inst))
@@ -87,8 +87,8 @@ function NikkiState:ApplyStateDef(def)
         end
     end
 
-    if next(self._active_key_bindings) then
-        for key_code, skill_id in pairs(self._active_key_bindings) do
+    if next(self._active_keys) then
+        for key_code, skill_id in pairs(self._active_keys) do
             if trigger_comp then
                 trigger_comp:Remove("keys", key_code, skill_id)
             end
@@ -97,7 +97,7 @@ function NikkiState:ApplyStateDef(def)
 
     self._active_overlay_skills = {}
     self._active_tags = {}
-    self._active_key_bindings = {}
+    self._active_keys = {}
 
     if not def then return end
 
@@ -125,12 +125,12 @@ function NikkiState:ApplyStateDef(def)
         self._active_tags = def.tags
     end
 
-    -- 按键绑定（key_bindings）
-    if def.key_bindings and next(def.key_bindings) then
-        for key_code, skill_id in pairs(def.key_bindings) do
+    -- 按键绑定（keys）
+    if def.keys and next(def.keys) then
+        for key_code, skill_id in pairs(def.keys) do
             if trigger_comp then
                 trigger_comp:Add("keys", key_code, skill_id)
-                self._active_key_bindings[key_code] = skill_id
+                self._active_keys[key_code] = skill_id
             end
         end
     end
@@ -182,8 +182,8 @@ function NikkiState:ApplyBasic(basic_state_name)
         end
     end
 
-    if basic_def.key_bindings and next(basic_def.key_bindings) and trigger_comp then
-        for key_code, skill_id in pairs(basic_def.key_bindings) do
+    if basic_def.keys and next(basic_def.keys) and trigger_comp then
+        for key_code, skill_id in pairs(basic_def.keys) do
             trigger_comp:Add("keys", key_code, skill_id)
         end
     end

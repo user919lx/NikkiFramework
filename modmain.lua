@@ -22,9 +22,10 @@ GLOBAL.NikkiManager = NikkiManager
 
 AddModRPCHandler("NikkiFramework", "CastKey", function(player, key)
     if player and player.components.nikki_skill_trigger then
-        player.components.nikki_skill_trigger:CastKey(key)
+        player.components.nikki_skill_trigger:Trigger("keys", key)
     end
 end)
+
 
 
 if not GLOBAL.TheNet:IsDedicated() then
