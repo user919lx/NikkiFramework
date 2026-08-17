@@ -1,8 +1,6 @@
 -- scripts/resolvers/skill_resolver.lua
 local BaseResolver = require("resolvers/base_resolver")
 local log = require("utils/log")
-local ResourceAdapter = require("utils/resource_adapter")
-local nikki_util = require("utils/nikki_util")  -- 复用现有工具函数
 
 local SG_STATE_MAP = {
     ["book"] = { "book" },
@@ -35,7 +33,6 @@ local function GenerateToggleEffectId(skill_id)
     return "_skill_toggle_" .. skill_id
 end
 
-
 local SkillResolver = Class(BaseResolver, function(self, defs)
     self._resolver_type = "skill"
     self.compiled_wheels = {}
@@ -44,17 +41,14 @@ local SkillResolver = Class(BaseResolver, function(self, defs)
 end)
 
 -- ============================================================
--- Toggle 预处理：只读遍历，返回两个 table，不修改传入数据
+-- Toggle 预处理（编译时）
 -- ============================================================
 function SkillResolver:PreprocessToggles(raw_skill_data)
     if not raw_skill_data or type(raw_skill_data) ~= "table" then
         return {}, {}
     end
 
-    -- Table A: [skill_id] = effect_id (字符串 toggle)
     local string_toggle_map = {}
-
-    -- Table B: [effect_id] = effect_def (内联 toggle)
     local inline_effect_defs = {}
 
     for skill_id, def in pairs(raw_skill_data) do
@@ -76,11 +70,11 @@ function SkillResolver:PreprocessToggles(raw_skill_data)
     return string_toggle_map, inline_effect_defs
 end
 
--- 预编译
+-- ============================================================
+-- 技能定义添加钩子（编译时）
+-- ============================================================
 function SkillResolver:OnDefAdded(skill_id, def)
-    -- ============================================================
-    -- Toggle 语法糖处理：生成 fn，忽略原有 fn
-    -- ============================================================
+    -- Toggle 语法糖处理
     if def.toggle then
         local effect_id
 
@@ -93,15 +87,16 @@ function SkillResolver:OnDefAdded(skill_id, def)
             return
         end
 
-        -- 生成切换 fn，覆盖原有 fn（如果有）
         def.fn = function(inst, params, def)
-            nikki_util.ApplyEffect(inst, effect_id, inst)
+            -- 这里生成切换 fn，但执行逻辑由组件处理
+            -- 注意：这里不能直接调用 nikki_util.ApplyEffect，因为 Resolver 不执行逻辑
+            -- 实际的 fn 执行由 nikki_skill 组件处理
+            return true
         end
-        -- 清理 toggle 字段，避免后续误用
         def.toggle = nil
     end
 
-    -- 语法糖处理
+    -- 语法糖：default_triggers 中的 function 转为 { fn = function }
     if def.default_triggers then
         for t_type, t_dict in pairs(def.default_triggers) do
             for k, v in pairs(t_dict) do
@@ -111,6 +106,8 @@ function SkillResolver:OnDefAdded(skill_id, def)
             end
         end
     end
+
+    -- Wheel 编译
     if type(def.wheel) == "table" and type(def.wheel.ui) == "table" then
         local w_def = def.wheel
         local ui = w_def.ui
@@ -169,6 +166,10 @@ function SkillResolver:OnDefAdded(skill_id, def)
         }
     end
 end
+
+-- ============================================================
+-- 纯查询接口
+-- ============================================================
 
 function SkillResolver:IsWheelSkill(skill_id)
     return self.compiled_wheels ~= nil and self.compiled_wheels[skill_id] ~= nil
@@ -297,17 +298,21 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
     return item
 end
 
-function SkillResolver:GetSkillRange(skill_id) return self:GetDef(skill_id) and self:GetDef(skill_id).range or nil end
+function SkillResolver:GetSkillRange(skill_id)
+    local def = self:GetDef(skill_id)
+    return def and def.range or nil
+end
 
 function SkillResolver:GetSkillCooldown(skill_id, trigger_type, trigger_key)
     local def = self:GetDef(skill_id)
     if not def then return 0 end
+
     local ctx = {}
     if trigger_type and trigger_key and def.default_triggers and def.default_triggers[trigger_type] then
         local specific = def.default_triggers[trigger_type][trigger_key]
         if type(specific) == "table" then ctx = specific end
     end
-    -- 如果有独立的子 fn，则不继承父级冷却
+
     local is_custom_fn = (ctx.fn ~= nil)
     if is_custom_fn then
         return ctx.cd or 0
@@ -324,131 +329,8 @@ function SkillResolver:NeedsServer(skill_id)
     return false
 end
 
-function SkillResolver:CheckRequiredTags(inst, skill_id, trigger_type, trigger_key)
-    local def = self:GetDef(skill_id)
-    if not def then return false end
-
-    local ctx = {}
-    if trigger_type and trigger_key and def.default_triggers and def.default_triggers[trigger_type] then
-        local specific = def.default_triggers[trigger_type][trigger_key]
-        if type(specific) == "table" then ctx = specific end
-    end
-
-    -- 如果有独立的子 fn，则不继承父级的通行证标签
-    local is_custom_fn = (ctx.fn ~= nil)
-    local req_tags = ctx.required_tags
-    if not is_custom_fn and req_tags == nil then
-        req_tags = def.required_tags
-    end
-
-    if req_tags then
-        for _, tag in ipairs(req_tags) do
-            if not inst:HasTag(tag) then
-                return false
-            end
-        end
-    end
-    return true
-end
-
-function SkillResolver:OnSkillAdd(inst, skill_id)
-    local def = self:GetDef(skill_id)
-    if not def then return end
-
-    -- 自动赋予技能声明的能力通行证 Tag
-    if def.tags then
-        for _, tag in ipairs(def.tags) do
-            inst:AddTag(tag)
-        end
-    end
-
-    if type(def.on_add) == "function" then
-        pcall(def.on_add, inst, def)
-    end
-end
-
-function SkillResolver:OnSkillRemove(inst, skill_id)
-    local def = self:GetDef(skill_id)
-    if not def then return end
-
-    -- 自动剥夺技能声明的能力通行证 Tag
-    if def.tags then
-        for _, tag in ipairs(def.tags) do
-            inst:RemoveTag(tag)
-        end
-    end
-
-    if type(def.on_remove) == "function" then
-        pcall(def.on_remove, inst, def)
-    end
-end
-
-function SkillResolver:ExecuteClientFn(inst, skill_id, params)
-    local def = self:GetDef(skill_id)
-    if not def then return false, "NOT_FOUND" end
-    if type(def.client_fn) == "function" then
-        local success, result, err = pcall(def.client_fn, inst, params, def)
-        if not success then
-            local full_stack = debug.traceback(result, 2)
-            for line in full_stack:gmatch("[^\n]+") do
-                log.error("[SkillResolver] client_fn crash in '%s': %s", skill_id, line)
-            end
-            return false, "EXECUTION_CRASHED"
-        elseif result == false then
-            return false, err or "EXECUTION_REJECTED"
-        end
-        return true
-    end
-    return true
-end
-
-function SkillResolver:ExecuteServerTrigger(inst, skill_id, trigger_type, trigger_key, params)
-    local def = self:GetDef(skill_id)
-    if not def then return false, "NOT_FOUND" end
-
-    if not self:CheckRequiredTags(inst, skill_id, trigger_type, trigger_key) then
-        return false, "MISSING_TAG"
-    end
-
-    local ctx = {}
-    if def.default_triggers and def.default_triggers[trigger_type] then
-        local specific = def.default_triggers[trigger_type][trigger_key]
-        if type(specific) == "table" then ctx = specific end
-    end
-
-    -- 判定是否为独立的子功能
-    local is_custom_fn = (ctx.fn ~= nil)
-    local fn = ctx.fn or def.fn
-
-    -- 如果有自定义的 fn，就只认它自己的 cost（没写就是无消耗）；否则才去继承父级的 cost
-    local cost = ctx.cost
-    if not is_custom_fn and cost == nil then
-        cost = def.cost
-    end
-
-    local amount = (cost and cost.amount and cost.amount > 0) and cost.amount or nil
-
-    if amount then
-        local current_val = ResourceAdapter.GetCurrent(inst, cost.res)
-        if current_val < amount then
-            return false, "NOT_ENOUGH_RESOURCE"
-        end
-    end
-
-    if fn then
-        local success, result, err = pcall(fn, inst, params, def)
-        if not success then
-            log.error("[SkillResolver] Crash in '%s': %s", skill_id, tostring(result))
-            return false, "EXECUTION_CRASHED"
-        elseif result == false then
-            return false, err or "EXECUTION_REJECTED"
-        end
-    end
-
-    if amount and cost and cost.res then
-        ResourceAdapter.DoDelta(inst, cost.res, -amount)
-    end
-    return true
-end
+-- GetDef 继承自 BaseResolver
+-- GetDisplayName 继承自 BaseResolver
+-- GetAllIds 继承自 BaseResolver
 
 return SkillResolver

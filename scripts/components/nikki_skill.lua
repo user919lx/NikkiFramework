@@ -1,8 +1,11 @@
 -- scripts/components/nikki_skill.lua
 local ResolverRegistry = require("nikki_resolver_registry")
 local log = require("utils/log")
+local ResourceAdapter = require("utils/resource_adapter")
 
--- 私有懒加载：首次调用时向注册表查一次并缓存到 self._resolver，后续直接读缓存
+-- ============================================================
+-- 私有懒加载
+-- ============================================================
 local function GetResolver(self)
     if not self._resolver then
         self._resolver = ResolverRegistry.Get("skill")
@@ -11,26 +14,164 @@ local function GetResolver(self)
 end
 
 local function on_max_range(self, max_range)
-    if self.inst.replica.nikki_skill then self.inst.replica.nikki_skill:SetMaxRange(max_range) end
+    if self.inst.replica.nikki_skill then
+        self.inst.replica.nikki_skill:SetMaxRange(max_range)
+    end
     self.inst:PushEvent("skill_max_range_dirty", { max_range = max_range })
 end
 
 local NikkiSkill = Class(function(self, inst)
-        self.inst = inst
-        self.max_range = 0
-        self._active_skills = {}
-        self._resolver = nil -- 私有缓存
+    self.inst = inst
+    self.max_range = 0
+    self._active_skills = {}
+    self._resolver = nil
+    self._cooldowns = {}
+end,
+nil,
+{
+    max_range = on_max_range
+})
 
-        -- 存储技能冷却的到期时间戳 [skill_id] = expire_time
-        self._cooldowns = {}
-    end,
-    nil,
-    {
-        max_range = on_max_range
-    })
+-- ============================================================
+-- 内部执行方法
+-- ============================================================
+
+function NikkiSkill:_CheckRequiredTags(skill_id, trigger_type, trigger_key)
+    local resolver = GetResolver(self)
+    local def = resolver:GetDef(skill_id)
+    if not def then return false end
+
+    local ctx = {}
+    if trigger_type and trigger_key and def.default_triggers and def.default_triggers[trigger_type] then
+        local specific = def.default_triggers[trigger_type][trigger_key]
+        if type(specific) == "table" then ctx = specific end
+    end
+
+    local is_custom_fn = (ctx.fn ~= nil)
+    local req_tags = ctx.required_tags
+    if not is_custom_fn and req_tags == nil then
+        req_tags = def.required_tags
+    end
+
+    if req_tags then
+        for _, tag in ipairs(req_tags) do
+            if not self.inst:HasTag(tag) then
+                return false
+            end
+        end
+    end
+    return true
+end
+
+function NikkiSkill:_OnSkillAdd(skill_id)
+    local resolver = GetResolver(self)
+    local def = resolver:GetDef(skill_id)
+    if not def then return end
+
+    if def.tags then
+        for _, tag in ipairs(def.tags) do
+            self.inst:AddTag(tag)
+        end
+    end
+
+    if type(def.on_add) == "function" then
+        pcall(def.on_add, self.inst, def)
+    end
+end
+
+function NikkiSkill:_OnSkillRemove(skill_id)
+    local resolver = GetResolver(self)
+    local def = resolver:GetDef(skill_id)
+    if not def then return end
+
+    if def.tags then
+        for _, tag in ipairs(def.tags) do
+            self.inst:RemoveTag(tag)
+        end
+    end
+
+    if type(def.on_remove) == "function" then
+        pcall(def.on_remove, self.inst, def)
+    end
+end
+
+function NikkiSkill:_Execute(skill_id, trigger_type, trigger_key, params)
+    local resolver = GetResolver(self)
+    local def = resolver:GetDef(skill_id)
+    if not def then return false, "NOT_FOUND" end
+
+    if not self:_CheckRequiredTags(skill_id, trigger_type, trigger_key) then
+        return false, "MISSING_TAG"
+    end
+
+    local ctx = {}
+    if def.default_triggers and def.default_triggers[trigger_type] then
+        local specific = def.default_triggers[trigger_type][trigger_key]
+        if type(specific) == "table" then ctx = specific end
+    end
+
+    local is_custom_fn = (ctx.fn ~= nil)
+    local fn = ctx.fn or def.fn
+
+    local cost = ctx.cost
+    if not is_custom_fn and cost == nil then
+        cost = def.cost
+    end
+
+    local amount = (cost and cost.amount and cost.amount > 0) and cost.amount or nil
+
+    if amount then
+        local current_val = ResourceAdapter.GetCurrent(self.inst, cost.res)
+        if current_val < amount then
+            return false, "NOT_ENOUGH_RESOURCE"
+        end
+    end
+
+    if fn then
+        local success, result, err = pcall(fn, self.inst, params, def)
+        if not success then
+            log.error("[NikkiSkill] Crash in '%s': %s", skill_id, tostring(result))
+            return false, "EXECUTION_CRASHED"
+        elseif result == false then
+            return false, err or "EXECUTION_REJECTED"
+        end
+    end
+
+    if amount and cost and cost.res then
+        ResourceAdapter.DoDelta(self.inst, cost.res, -amount)
+    end
+    return true
+end
+
+function NikkiSkill:_ExecuteClient(skill_id, params)
+    local resolver = GetResolver(self)
+    local def = resolver:GetDef(skill_id)
+    if not def then return false, "NOT_FOUND" end
+
+    if type(def.client_fn) == "function" then
+        local success, result, err = pcall(def.client_fn, self.inst, params, def)
+        if not success then
+            local full_stack = debug.traceback(result, 2)
+            for line in full_stack:gmatch("[^\n]+") do
+                log.error("[NikkiSkill] client_fn crash in '%s': %s", skill_id, line)
+            end
+            return false, "EXECUTION_CRASHED"
+        elseif result == false then
+            return false, err or "EXECUTION_REJECTED"
+        end
+        return true
+    end
+    return true
+end
+
+-- ============================================================
+-- 公开 API
+-- ============================================================
 
 function NikkiSkill:IsAdded(skill_id)
-    for _, id in ipairs(self._active_skills) do if id == skill_id then return true end end
+    for _, id in ipairs(self._active_skills) do
+        if id == skill_id then return true end
+    end
     return false
 end
 
@@ -47,27 +188,24 @@ function NikkiSkill:_UpdateRangeRadius()
 end
 
 function NikkiSkill:AddSkills(ids)
-    local resolver = GetResolver(self)
-    if not ids or not resolver then return end
+    if not ids then return end
 
     for _, id in ipairs(ids) do
         if not self:IsAdded(id) then
-            resolver:OnSkillAdd(self.inst, id)
+            self:_OnSkillAdd(id)
             table.insert(self._active_skills, id)
-            log.debug("[NikkiSkill] Added skill '%s' to %s.", tostring(id), tostring(self.inst)
-            )
+            log.debug("[NikkiSkill] Added skill '%s' to %s.", tostring(id), tostring(self.inst))
         end
     end
     self:_UpdateRangeRadius()
 end
 
 function NikkiSkill:RemoveSkills(ids)
-    local resolver = GetResolver(self)
-    if not ids or not resolver then return end
+    if not ids then return end
 
     for _, id in ipairs(ids) do
         if self:IsAdded(id) then
-            resolver:OnSkillRemove(self.inst, id)
+            self:_OnSkillRemove(id)
             for i, existing_id in ipairs(self._active_skills) do
                 if existing_id == id then
                     table.remove(self._active_skills, i)
@@ -75,7 +213,6 @@ function NikkiSkill:RemoveSkills(ids)
                     break
                 end
             end
-            -- 移除技能时清理冗余的 CD 数据
             self._cooldowns[id] = nil
         end
     end
@@ -87,8 +224,6 @@ function NikkiSkill:GetCooldown(skill_id)
     if not expire_time then return 0 end
 
     local remain = expire_time - GetTime()
-    log.debug("[NikkiSkill] GetCooldown for skill '%s': remain=%.2f (expire_time=%.2f, current_time=%.2f)", skill_id,
-        remain, expire_time, GetTime())
     if remain <= 0 then
         self._cooldowns[skill_id] = nil
         return 0
@@ -104,30 +239,29 @@ function NikkiSkill:StartCooldown(skill_id, cd_time)
     if cd_time and cd_time > 0 then
         self._cooldowns[skill_id] = GetTime() + cd_time
 
-        -- 巧妙借用官方组件：下发隐形实体同步 UI
         if self.inst.components.spellbookcooldowns then
             self.inst.components.spellbookcooldowns:RestartSpellCooldown(skill_id, cd_time)
         end
     end
 end
 
--- ========================================================
--- 核心修正：拦截防线与结算都由 Component 自己控制，保持单向调用
--- ========================================================
-function NikkiSkill:ExecuteTrigger(skill_id, trigger_type, trigger_key, params)
-    local resolver = GetResolver(self)
-    if not resolver or not self:IsAdded(skill_id) then return false, "NOT_ADDED" end
+-- ============================================================
+-- 核心执行入口
+-- ============================================================
 
-    -- 1. Component 自己负责拦截处于冷却中的技能
+function NikkiSkill:ExecuteTrigger(skill_id, trigger_type, trigger_key, params)
+    if not self:IsAdded(skill_id) then
+        return false, "NOT_ADDED"
+    end
+
     if self:IsOnCooldown(skill_id) then
         return false, "ON_COOLDOWN"
     end
 
-    -- 2. 委托 Resolver 执行无状态的验资与业务逻辑
-    local success, err = resolver:ExecuteServerTrigger(self.inst, skill_id, trigger_type, trigger_key, params)
+    local success, err = self:_Execute(skill_id, trigger_type, trigger_key, params)
 
-    -- 3. 业务执行成功后，Component 自己查 CD 数值并开启计时
     if success then
+        local resolver = GetResolver(self)
         local cd = resolver:GetSkillCooldown(skill_id, trigger_type, trigger_key)
         if cd and cd > 0 then
             self:StartCooldown(skill_id, cd)
@@ -139,6 +273,14 @@ end
 
 function NikkiSkill:CastSkill(id, params)
     return self:ExecuteTrigger(id, "cast", "default", params)
+end
+
+-- ============================================================
+-- 客户端执行（供 Replica 调用）
+-- ============================================================
+
+function NikkiSkill:ExecuteClientFn(skill_id, params)
+    return self:_ExecuteClient(skill_id, params)
 end
 
 return NikkiSkill

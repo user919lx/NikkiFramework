@@ -32,57 +32,40 @@ local function ApplyTriggerOverrides(target, source)
             elseif type(v) == "table" then
                 target[t_type][k] = target[t_type][k] or {}
                 for sub_k, sub_v in pairs(v) do
-                    if sub_v == false then target[t_type][k][sub_k] = nil else target[t_type][k][sub_k] = true end
+                    if sub_v == false then
+                        target[t_type][k][sub_k] = nil
+                    else
+                        target[t_type][k][sub_k] = true
+                    end
                 end
             end
         end
     end
 end
 
-local function HookActionForSkill(action_id)
-    local action = ACTIONS[action_id]
-    if not action or action._nikki_hooked then return end
-    local old_fn = action.fn
-    action.fn = function(act)
-        local origin_result, origin_reason = old_fn and old_fn(act) or nil, nil
-        if act.doer and act.doer.components.nikki_skill_trigger then
-            local params = {
-                act = act,
-                target = act.target,
-                pos = type(act.GetActionPoint) == "function" and act:GetActionPoint() or nil,
-                doer = act.doer,
-                invobject = act.invobject,
-                origin_result = origin_result
-            }
-            local result, reason = act.doer.components.nikki_skill_trigger:CastAction(act.action.id, params)
-            return result, reason
-        end
-        return origin_result, origin_reason
-    end
-    action._nikki_hooked = true
-end
+-- ========================================================
+-- 注意：HookActionForSkill 已迁移到 nikki_framework_manager.lua
+-- ========================================================
 
--- ========================================================
--- StateResolver 核心类
--- ========================================================
 local StateResolver = Class(BaseResolver, function(self, defs)
     self._resolver_type = "state"
     BaseResolver._ctor(self, defs)
 end)
 
--- 显式依赖注入接口：由外部传入 skill_data，互不耦合
-function StateResolver:AddStateConfig(state_cfg, raw_skill_data)
+-- ========================================================
+-- 编译接口（初始化时调用，不是运行时查询）
+-- ========================================================
+function StateResolver:AddStateConfig(state_cfg, raw_skill_data, hook_action_fn)
     if not state_cfg then return end
 
     local state_file = type(state_cfg) == "table" and state_cfg.file or
-    (type(state_cfg) == "string" and state_cfg or nil)
+        (type(state_cfg) == "string" and state_cfg or nil)
     local basic_state = type(state_cfg) == "table" and state_cfg.basic or "basic"
     if not state_file then return end
 
     local raw_state_data = require(state_file)
     if not raw_state_data then return end
 
-    -- 执行预编译
     local basic = raw_state_data[basic_state] or {}
     for state_name, state_def in pairs(raw_state_data) do
         if state_name ~= basic_state then
@@ -92,7 +75,6 @@ function StateResolver:AddStateConfig(state_cfg, raw_skill_data)
 
             local compiled_triggers = { keys = {}, actions = {}, events = {} }
 
-            -- 注入引用的技能触发器规则
             if raw_skill_data then
                 for _, skill_id in ipairs(state_def.skills or {}) do
                     local s_def = raw_skill_data[skill_id]
@@ -113,25 +95,29 @@ function StateResolver:AddStateConfig(state_cfg, raw_skill_data)
             ApplyTriggerOverrides(compiled_triggers, basic.triggers)
             ApplyTriggerOverrides(compiled_triggers, state_def.triggers)
             state_def.compiled_triggers = compiled_triggers
-            if compiled_triggers.actions then
+
+            -- 如果有 actions 且传入了 hook 函数，执行劫持
+            if compiled_triggers.actions and hook_action_fn then
                 for action_id, _ in pairs(compiled_triggers.actions) do
-                    HookActionForSkill(action_id)
+                    hook_action_fn(action_id)
                 end
             end
         end
     end
 
-    -- 解析完毕，汇入底层的字典
     self:AddDefs(raw_state_data)
 end
+
+-- ============================================================
+-- 纯查询接口
+-- ============================================================
 
 function StateResolver:OnDefAdded(state_name, def)
     if def.compiled_triggers and def.compiled_triggers.keys then
         local numeric_keys = {}
         for k, v in pairs(def.compiled_triggers.keys) do
-            local global_env = _G
-            if type(k) == "string" and rawget(global_env, k) ~= nil then
-                numeric_keys[rawget(global_env, k)] = v
+            if type(k) == "string" and rawget(_G, k) ~= nil then
+                numeric_keys[rawget(_G, k)] = v
             else
                 numeric_keys[k] = v
             end
@@ -140,9 +126,13 @@ function StateResolver:OnDefAdded(state_name, def)
     end
 end
 
-function StateResolver:GetStateDef(state_name) return self:GetDef(state_name) or {} end
+function StateResolver:GetStateDef(state_name)
+    return self:GetDef(state_name) or {}
+end
 
-function StateResolver:GetAllStates() return self:GetAllDefs() end
+function StateResolver:GetAllStates()
+    return self:GetAllDefs()
+end
 
 function StateResolver:GetBadges(state)
     local def = self:GetStateDef(state)

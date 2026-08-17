@@ -8,6 +8,32 @@ local ModifierAdapter = require("utils/modifier_adapter")
 local ResourceAdapter = require("utils/resource_adapter")
 
 -- ========================================================
+-- Action 劫持工具（从 state_resolver 迁移至此）
+-- ========================================================
+local function HookActionForSkill(action_id)
+    local action = ACTIONS[action_id]
+    if not action or action._nikki_hooked then return end
+    local old_fn = action.fn
+    action.fn = function(act)
+        local origin_result, origin_reason = old_fn and old_fn(act) or nil, nil
+        if act.doer and act.doer.components.nikki_skill_trigger then
+            local params = {
+                act = act,
+                target = act.target,
+                pos = type(act.GetActionPoint) == "function" and act:GetActionPoint() or nil,
+                doer = act.doer,
+                invobject = act.invobject,
+                origin_result = origin_result
+            }
+            local result, reason = act.doer.components.nikki_skill_trigger:CastAction(act.action.id, params)
+            return result, reason
+        end
+        return origin_result, origin_reason
+    end
+    action._nikki_hooked = true
+end
+
+-- ========================================================
 -- 组件分层装配工厂
 -- ========================================================
 local TIER_LEVELS = { skill = 2, player = 3 }
@@ -30,7 +56,6 @@ local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resou
 
     if tier_level < 2 then return end
 
-    -- 层级 2: Resources, Skill 与 State (施法者/技能拥有者)
     if custom_resources then
         for res_id, config_data in pairs(custom_resources) do
             if config_data.component and config_data.component.name then
@@ -61,7 +86,6 @@ local function ApplyFrameworkToInst(inst, tier_name, default_state, custom_resou
 
     if tier_level < 3 then return end
 
-    -- 层级 3: SkillWheel (UI / 交互入口)
     if not inst.components.nikki_skillwheel then
         inst:AddComponent("nikki_skillwheel")
     end
@@ -90,7 +114,6 @@ function NikkiFrameworkManager.Init(config, mod_env)
 
     if config.custom_modifiers then
         for mod_type, strategy_data in pairs(config.custom_modifiers) do
-            -- 传入 mod_env，供策略的 init 函数使用
             ModifierAdapter.RegisterStrategy(mod_type, strategy_data, mod_env)
         end
     end
@@ -131,13 +154,8 @@ function NikkiFrameworkManager.Init(config, mod_env)
         if type(defs.skill) == "string" then
             raw_skill_data = require(defs.skill)
             if raw_skill_data then
-                -- ========================================================
-                -- Toggle 预处理
-                -- ========================================================
-                -- 1. 调用 SkillResolver 预处理，返回两个 table
                 local string_toggle_map, inline_effect_defs = def_resolvers.skill:PreprocessToggles(raw_skill_data)
 
-                -- 2. 遍历 string_toggle_map，检查 effect 是否存在，不存在则删除对应的 skill
                 for skill_id, effect_id in pairs(string_toggle_map) do
                     if not def_resolvers.effect:GetDef(effect_id) then
                         log.error("[Manager] Skill '%s' references non-existent effect '%s'. Skill removed.", skill_id,
@@ -146,20 +164,19 @@ function NikkiFrameworkManager.Init(config, mod_env)
                     end
                 end
 
-                -- 3. 注册内联 toggle 生成的 effect defs
                 if next(inline_effect_defs) then
                     def_resolvers.effect:AddDefs(inline_effect_defs)
                     log.debug("[Manager] Registered %d auto-generated toggle effects.", GetTableSize(inline_effect_defs))
                 end
 
-                -- 4. 注册处理后的 Skill Defs
                 def_resolvers.skill:AddDefs(raw_skill_data)
                 log.debug("[Manager] Appended skills to global pool from '%s'.", defs.skill)
             end
         end
 
         if defs.state then
-            def_resolvers.state:AddStateConfig(defs.state, raw_skill_data)
+            -- 传入 HookActionForSkill 作为回调，由 StateResolver 在编译时调用
+            def_resolvers.state:AddStateConfig(defs.state, raw_skill_data, HookActionForSkill)
             log.debug("[Manager] Appended states to global pool.")
 
             if type(defs.state) == "table" and defs.state.default then
