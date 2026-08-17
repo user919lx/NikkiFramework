@@ -16,7 +16,7 @@ AddReplicableComponent("nikki_skillwheel")
 AddReplicableComponent("nikki_skill")
 
 local NikkiManager = require("nikki_manager").GetInstance()
-NikkiManager:Init()
+NikkiManager:Init(env)
 GLOBAL.NikkiManager = NikkiManager
 
 

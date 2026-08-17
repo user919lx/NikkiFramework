@@ -31,20 +31,15 @@ end)
 -- ============================================================
 -- 初始化框架（由 modmain 调用）
 -- ============================================================
-function NikkiManager:Init()
+function NikkiManager:Init(env)
     if self._is_initialized then
         log.warn("[NikkiManager] Already initialized. Skipping.")
         return
     end
 
-    -- 1. 创建 Resolver 实例
     self:_CreateResolvers()
-
-    -- 2. 加载客户端设置
     self:_LoadSettings()
-
-    -- 3. 安装 Action 劫持（默认启用，但可以注释掉）
-    -- self:_InstallActionHook()
+    self:_InstallTriggerHooks(env)
 
     self._is_initialized = true
     log.info("[NikkiManager] Framework initialized.")
@@ -84,11 +79,105 @@ end
 -- ============================================================
 -- 私有方法
 -- ============================================================
-
 function NikkiManager:_CreateResolvers()
     self.effect_resolver = EffectResolver()
     self.skill_resolver = SkillResolver()
     self.state_resolver = StateResolver()
+end
+
+-- ============================================================
+-- 为 nikki_skill_trigger 安装劫持，使其能自动拦截 Action 和 Event
+-- ============================================================
+function NikkiManager:_InstallTriggerHooks(env)
+    if self._hooks_installed then
+        log.warn("[NikkiManager] Trigger hooks already installed.")
+        return
+    end
+
+    -- ============================================================
+    -- 1. Action 劫持：劫持 BufferedAction:Do
+    --    任何 Action 执行前都会经过 trigger:CastAction
+    -- ============================================================
+    env.AddClassPostConstruct("bufferedaction", function(self)
+        local _super_Do = self.Do
+        self.Do = function(self)
+            local origin_result, origin_reason = _super_Do(self)
+            if self.doer and self.doer:IsValid() and self.action and self.action.id then
+                local trigger = self.doer.components.nikki_skill_trigger
+                if trigger then
+                    local params = {
+                        act = self,
+                        target = self.target,
+                        pos = type(self.GetActionPoint) == "function" and self:GetActionPoint() or nil,
+                        doer = self.doer,
+                        invobject = self.invobject,
+                        origin_result = origin_result,
+                    }
+                    trigger:CastAction(self.action.id, params)
+                end
+            end
+            return origin_result, origin_reason
+        end
+    end)
+
+
+    -- ============================================================
+    -- 2. Event 劫持：劫持 EntityScript:PushEvent / PushEventImmediate
+    --    任何事件触发时都会经过 trigger:CastEvent
+    -- ============================================================
+    local event_depth = 0
+    local MAX_EVENT_DEPTH = 8
+
+    env.AddClassPostConstruct("entityscript", function(self)
+        local _super_PushEvent = self.PushEvent
+        self.PushEvent = function(self, event, data)
+            local result = _super_PushEvent(self, event, data)
+
+            if self and self:IsValid() and self.components and self.components.nikki_skill_trigger then
+                if event_depth >= MAX_EVENT_DEPTH then
+                    log.error("[NikkiManager] Event loop detected! Max depth (%d) exceeded for event '%s'.",
+                        MAX_EVENT_DEPTH, tostring(event))
+                    return result
+                end
+
+                event_depth = event_depth + 1
+                xpcall(function()
+                    self.components.nikki_skill_trigger:CastEvent(event, data)
+                end, function(err)
+                    log.error("[NikkiManager] Error in CastEvent for '%s': %s", tostring(event), tostring(err))
+                end)
+                event_depth = event_depth - 1
+            end
+
+            return result
+        end
+
+        local _super_PushEventImmediate = self.PushEventImmediate
+        self.PushEventImmediate = function(self, event, data)
+            local result = _super_PushEventImmediate(self, event, data)
+
+            if self and self:IsValid() and self.components and self.components.nikki_skill_trigger then
+                if event_depth >= MAX_EVENT_DEPTH then
+                    log.error("[NikkiManager] Event loop detected! Max depth (%d) exceeded for immediate event '%s'.",
+                        MAX_EVENT_DEPTH, tostring(event))
+                    return result
+                end
+
+                event_depth = event_depth + 1
+                xpcall(function()
+                    self.components.nikki_skill_trigger:CastEvent(event, data)
+                end, function(err)
+                    log.error("[NikkiManager] Error in CastEvent for immediate '%s': %s", tostring(event), tostring(err))
+                end)
+                event_depth = event_depth - 1
+            end
+
+            return result
+        end
+    end)
+
+    self._hooks_installed = true
+    log.info("[NikkiManager] Trigger hooks installed (Action + Event routing).")
 end
 
 function NikkiManager:_RegisterExtensions(config, mod_env)
@@ -147,9 +236,6 @@ function NikkiManager:_LoadDefs(config)
         local state_cfg = defs.state
         -- 传入 hook 函数以便在 StateResolver 中劫持 Action
         self.state_resolver:AddStateConfig(state_cfg, raw_skill_data)
-        -- self.state_resolver:AddStateConfig(state_cfg, raw_skill_data, function(action_id)
-            -- self:_HookAction(action_id)
-        -- end)
         log.debug("[NikkiManager] Loaded states.")
     end
 end
@@ -177,74 +263,6 @@ function NikkiManager:_SaveSettings()
         TheSim:SetPersistentString(self._settings_file, str, false)
     else
         log.error("[NikkiManager] Failed to save settings.")
-    end
-end
-
--- ============================================================
--- Action 劫持（完整实现）
--- ============================================================
-function NikkiManager:_InstallActionHook()
-    if self._hook_installed then return end
-
-    local function hook_action(action_id)
-        local action = ACTIONS[action_id]
-        if not action or action._nikki_hooked then return end
-        local old_fn = action.fn
-        action.fn = function(act)
-            local origin_result, origin_reason = old_fn and old_fn(act) or nil, nil
-            if act.doer and act.doer.components.nikki_skill_trigger then
-                local params = {
-                    act = act,
-                    target = act.target,
-                    pos = type(act.GetActionPoint) == "function" and act:GetActionPoint() or nil,
-                    doer = act.doer,
-                    invobject = act.invobject,
-                    origin_result = origin_result
-                }
-                local result, reason = act.doer.components.nikki_skill_trigger:CastAction(act.action.id, params)
-                return result, reason
-            end
-            return origin_result, origin_reason
-        end
-        action._nikki_hooked = true
-    end
-
-    -- 劫持已注册的 ACTIONS
-    for action_id, action in pairs(ACTIONS) do
-        if action and action.id then
-            hook_action(action_id)
-        end
-    end
-
-    self._hook_installed = true
-end
-
--- 单独劫持某个 Action（供 StateResolver 调用）
-function NikkiManager:_HookAction(action_id)
-    if self._hook_installed then
-        local action = ACTIONS[action_id]
-        if action and not action._nikki_hooked then
-            local old_fn = action.fn
-            action.fn = function(act)
-                local origin_result, origin_reason = old_fn and old_fn(act) or nil, nil
-                if act.doer and act.doer.components.nikki_skill_trigger then
-                    local params = {
-                        act = act,
-                        target = act.target,
-                        pos = type(act.GetActionPoint) == "function" and act:GetActionPoint() or nil,
-                        doer = act.doer,
-                        invobject = act.invobject,
-                        origin_result = origin_result
-                    }
-                    local result, reason = act.doer.components.nikki_skill_trigger:CastAction(act.action.id, params)
-                    return result, reason
-                end
-                return origin_result, origin_reason
-            end
-            action._nikki_hooked = true
-        end
-    else
-        self:_InstallActionHook()
     end
 end
 
@@ -376,7 +394,7 @@ end
 
 function NikkiManager:ExecuteSkill(inst, skill_id, params)
     if not inst or not inst.components.nikki_skill then return false, "NO_COMPONENT" end
-    return inst.components.nikki_skill:ExecuteTrigger(skill_id, "cast", "default", params or {})
+    return inst.components.nikki_skill:Execute(skill_id, "cast", "default", params or {})
 end
 
 -- ============================================================
