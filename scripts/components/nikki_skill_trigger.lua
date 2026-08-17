@@ -27,7 +27,8 @@ local NikkiSkillTrigger = Class(function(self, inst)
     nil,
     {
         range_target = on_range_target
-    })
+    }
+)
 
 -- ==========================================================
 -- 配置触发器（由 State 或外部调用）

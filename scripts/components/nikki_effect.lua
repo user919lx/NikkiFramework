@@ -1,5 +1,4 @@
 -- scripts/components/nikki_effect.lua
-local ResolverRegistry = require("nikki_resolver_registry")
 local log = require("utils/log")
 local TimerScheduler = require("utils/timer_scheduler")
 local ResourceAdapter = require("utils/resource_adapter")
@@ -132,11 +131,11 @@ local function SpawnAuraFx(inst, def, context)
 end
 
 -- ============================================================
--- 私有懒加载
+-- 通过全局 Manager 获取 Resolver
 -- ============================================================
 local function GetResolver(self)
-    if not self._resolver then
-        self._resolver = ResolverRegistry.Get("effect")
+    if not self._resolver and NikkiManager then
+        self._resolver = NikkiManager:GetEffectResolver()
     end
     return self._resolver
 end

@@ -1,7 +1,5 @@
 -- scripts/prefabs/nikki_range_indicator.lua
 local log = require("utils/log")
-local NikkiClientSettings = require("nikki_client_settings")
-
 local TEXTURE_SIZE = 1900
 local assets = {
     Asset("ANIM", "anim/firefighter_placement.zip"),
@@ -50,10 +48,7 @@ local function Attach(inst, owner)
         inst.owner = owner
         inst.entity:SetParent(owner.entity)
 
-        -- ==========================================================
-        -- 初始化：使用通用 API 传入 "show_range" 读取
-        -- ==========================================================
-        inst._is_toggled_on = NikkiClientSettings.Get("show_range")
+        inst._is_toggled_on = NikkiManager:GetSetting("show_range")
 
         inst:ListenForEvent("skill_range_toggle_changed", function(owner_inst, data)
             if data ~= nil and data.new_state ~= nil then
@@ -74,6 +69,7 @@ local function Attach(inst, owner)
         end
     end
 end
+
 
 local function fn()
     local inst = CreateEntity()

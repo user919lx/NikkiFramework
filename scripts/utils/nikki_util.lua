@@ -1,59 +1,58 @@
 -- scripts/utils/nikki_util.lua
 local log = require("utils/log")
-local ResolverRegistry = require("nikki_resolver_registry") -- 新增
 
 -- =============================================
 -- 效果施加
 -- =============================================
 
 --- 给目标施加一个效果（确保目标有 nikki_effect 组件）
-local function ApplyEffect(target, effect_id, source)
-    if not target or not target:IsValid() then
-        log.warn("[NikkiUtil] ApplyEffect: invalid target")
-        return false
-    end
+-- local function ApplyEffect(target, effect_id, source)
+--     if not target or not target:IsValid() then
+--         log.warn("[NikkiUtil] ApplyEffect: invalid target")
+--         return false
+--     end
 
-    -- 只在服务端执行逻辑
-    if not TheWorld.ismastersim then
-        return false
-    end
+--     -- 只在服务端执行逻辑
+--     if not TheWorld.ismastersim then
+--         return false
+--     end
 
-    local effect_comp = target.components.nikki_effect
-    if not effect_comp then
-        target:AddComponent("nikki_effect")
-        effect_comp = target.components.nikki_effect
-        log.debug("[NikkiUtil] Auto-added nikki_effect component to %s", tostring(target))
-    end
+--     local effect_comp = target.components.nikki_effect
+--     if not effect_comp then
+--         target:AddComponent("nikki_effect")
+--         effect_comp = target.components.nikki_effect
+--         log.debug("[NikkiUtil] Auto-added nikki_effect component to %s", tostring(target))
+--     end
 
-    return effect_comp:Apply(effect_id, source)
-end
+--     return effect_comp:Apply(effect_id, source)
+-- end
 
 
-local function ToggleEffectLayered(inst, effect_id, remove_all, source)
-    local effect_comp = inst.components.nikki_effect
-    if not effect_comp then return false end
+-- local function ToggleEffectLayered(inst, effect_id, remove_all, source)
+--     local effect_comp = inst.components.nikki_effect
+--     if not effect_comp then return false end
 
-    -- 从 EffectResolver 获取 max
-    local resolver = ResolverRegistry.Get("effect")
-    if not resolver then return false end
-    local _, max, _, _ = resolver:GetEffectConfig(effect_id)
-    if not max or max <= 1 then
-        -- 退化为普通 toggle
-        if effect_comp:HasEffect(effect_id) then
-            effect_comp:Remove(effect_id, true)
-            return true
-        else
-            return effect_comp:Apply(effect_id, source or inst)
-        end
-    end
-    local layers = effect_comp:GetLayers(effect_id)
-    if layers >= max then
-        effect_comp:Remove(effect_id, remove_all ~= false)
-        return true
-    else
-        return effect_comp:Apply(effect_id, source or inst)
-    end
-end
+--     -- 从 EffectResolver 获取 max
+--     local resolver = ResolverRegistry.Get("effect")
+--     if not resolver then return false end
+--     local _, max, _, _ = resolver:GetEffectConfig(effect_id)
+--     if not max or max <= 1 then
+--         -- 退化为普通 toggle
+--         if effect_comp:HasEffect(effect_id) then
+--             effect_comp:Remove(effect_id, true)
+--             return true
+--         else
+--             return effect_comp:Apply(effect_id, source or inst)
+--         end
+--     end
+--     local layers = effect_comp:GetLayers(effect_id)
+--     if layers >= max then
+--         effect_comp:Remove(effect_id, remove_all ~= false)
+--         return true
+--     else
+--         return effect_comp:Apply(effect_id, source or inst)
+--     end
+-- end
 
 
 
@@ -140,9 +139,9 @@ end
 -- 导出
 -- =============================================
 return {
-    ApplyEffect = ApplyEffect,
+    -- ApplyEffect = ApplyEffect,
     PerformClickAction = PerformClickAction,
     PerformRightClickAction = PerformRightClickAction,
     PerformLeftClickAction = PerformLeftClickAction,
-    ToggleEffectLayered = ToggleEffectLayered
+    -- ToggleEffectLayered = ToggleEffectLayered
 }

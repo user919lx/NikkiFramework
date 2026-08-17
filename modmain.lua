@@ -1,4 +1,4 @@
-local log = GLOBAL.require("utils/log")
+local log = require("utils/log")
 local is_debug_mode = GetModConfigData("debug_mode")
 if is_debug_mode then
     log.set_level("debug")
@@ -15,17 +15,14 @@ AddReplicableComponent("nikki_state")
 AddReplicableComponent("nikki_skillwheel")
 AddReplicableComponent("nikki_skill")
 
+local NikkiManager = require("nikki_manager").GetInstance()
+NikkiManager:Init()
+GLOBAL.NikkiManager = NikkiManager
 
 
--- 废除 CastKey RPC，统一使用 CastSkill
-AddModRPCHandler("NikkiFramework", "CastSkill", function(player, skill_id, target, has_pos, px, pz)
-    -- 统一网关：必须先经过 nikki_skill_trigger 拦截并记录上下文！
+AddModRPCHandler("NikkiFramework", "CastKey", function(player, key)
     if player and player.components.nikki_skill_trigger then
-        local params = {}
-        if target then params.target = target end
-        if has_pos then params.pos = GLOBAL.Vector3(px, 0, pz) end
-        -- 交给 Trigger 缓存目标，再由其转发给 Skill
-        player.components.nikki_skill_trigger:CastSkill(skill_id, params)
+        player.components.nikki_skill_trigger:CastKey(key)
     end
 end)
 
@@ -44,7 +41,7 @@ if not GLOBAL.TheNet:IsDedicated() then
         if not self.owner:HasTag("nikki_framework") then return end
         -- 可调参数
         local DEFAULT_BADGE_SPACING = 62 -- 默认徽章间距
-        local VERTICAL_MARGIN = 52        -- 徽章底部到按钮的边距（逻辑像素）
+        local VERTICAL_MARGIN = 52       -- 徽章底部到按钮的边距（逻辑像素）
 
         -- 私有成员
         self._nikki_badges = {}
@@ -112,15 +109,12 @@ if not GLOBAL.TheNet:IsDedicated() then
         -- 私有方法：确保范围按钮已创建
         -- ============================================================
         function self:_Nikki_EnsureRangeButton()
-            if self._nikki_range_btn then
-                return
-            end
+            if self._nikki_range_btn then return end
             local TEMPLATES = require("widgets/redux/templates")
-            local NikkiClientSettings = require("nikki_client_settings")
-            local init_checked = NikkiClientSettings.Get("show_range")
+            local init_checked = GLOBAL.NikkiManager:GetSetting("show_range")
             self._nikki_range_btn = self:AddChild(TEMPLATES.StandardCheckbox(
                 function()
-                    local new_state = NikkiClientSettings.Toggle("show_range")
+                    local new_state = GLOBAL.NikkiManager:ToggleSetting("show_range")
                     local owner = self.owner
                     if owner and owner:IsValid() then
                         owner:PushEvent("skill_range_toggle_changed", { new_state = new_state })
@@ -218,6 +212,7 @@ if not GLOBAL.TheNet:IsDedicated() then
         end
     end)
 end
+
 
 if not is_debug_mode then
     return

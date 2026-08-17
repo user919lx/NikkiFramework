@@ -1,14 +1,13 @@
 -- scripts/components/nikki_skill.lua
-local ResolverRegistry = require("nikki_resolver_registry")
 local log = require("utils/log")
 local ResourceAdapter = require("utils/resource_adapter")
 
 -- ============================================================
--- 私有懒加载
+-- 通过全局 Manager 获取 Resolver
 -- ============================================================
 local function GetResolver(self)
-    if not self._resolver then
-        self._resolver = ResolverRegistry.Get("skill")
+    if not self._resolver and NikkiManager then
+        self._resolver = NikkiManager:GetSkillResolver()
     end
     return self._resolver
 end
@@ -61,6 +60,28 @@ function NikkiSkill:_CheckRequiredTags(skill_id, trigger_type, trigger_key)
         end
     end
     return true
+end
+
+function NikkiSkill:CheckRequiredTags(skill_id, trigger_type, trigger_key)
+    return self:_CheckRequiredTags(skill_id, trigger_type, trigger_key)
+end
+
+function NikkiSkill:NeedsServer(skill_id)
+    local resolver = GetResolver(self)
+    if not resolver then return false end
+    return resolver:NeedsServer(skill_id)
+end
+
+function NikkiSkill:GetSkillRange(skill_id)
+    local resolver = GetResolver(self)
+    if not resolver then return nil end
+    return resolver:GetSkillRange(skill_id)
+end
+
+function NikkiSkill:GetSkillCooldown(skill_id, trigger_type, trigger_key)
+    local resolver = GetResolver(self)
+    if not resolver then return 0 end
+    return resolver:GetSkillCooldown(skill_id, trigger_type, trigger_key)
 end
 
 function NikkiSkill:_OnSkillAdd(skill_id)

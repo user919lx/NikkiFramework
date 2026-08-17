@@ -1,11 +1,10 @@
 -- scripts/components/nikki_state.lua
-local ResolverRegistry = require("nikki_resolver_registry")
 local log = require("utils/log")
 
--- 私有懒加载
+-- 通过全局 Manager 获取 Resolver
 local function GetResolver(self)
-    if not self._resolver then
-        self._resolver = ResolverRegistry.Get("state")
+    if not self._resolver and NikkiManager then
+        self._resolver = NikkiManager:GetStateResolver()
     end
     return self._resolver
 end

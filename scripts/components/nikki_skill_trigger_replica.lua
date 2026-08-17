@@ -16,36 +16,12 @@ function NikkiSkillTrigger:GetRangeTarget()
 end
 
 function NikkiSkillTrigger:CastKey(key_code)
-    if not self.inst.replica.nikki_state then return false end
-    local skills = self.inst.replica.nikki_state:GetSkillsForKey(key_code)
-    if not skills then return false end
-
-    -- 【核心注入】：自动提取记忆目标，封装进 params 往下传
-    local params = { key = key_code }
-    local mem_target = self:GetRangeTarget()
-    if mem_target and mem_target:IsValid() then
-        params.target = mem_target
-        log.debug("[NikkiSkillTrigger Replica] Injected memorized target: %s", tostring(mem_target))
-    end
-
-    if self.inst.replica.nikki_skill then
-        self.inst.replica.nikki_skill:CastKey(key_code, skills, params)
-    end
-    return true
-end
-
-function NikkiSkillTrigger:CastSkill(id, params)
-    params = params or {}
-    -- 如果玩家没有显式指定目标，则尝试填充记忆目标
-    if not params.target then
-        local mem_target = self:GetRangeTarget()
-        if mem_target and mem_target:IsValid() then
-            params.target = mem_target
-        end
-    end
-    if self.inst.replica.nikki_skill then
-        self.inst.replica.nikki_skill:CastSkill(id, params)
+    if self.inst.components.nikki_skill_trigger then
+        self.inst.components.nikki_skill_trigger:CastKey(key_code)
+    else
+        SendModRPCToServer(GetModRPC("NikkiFramework", "CastKey"), key_code)
     end
 end
+
 
 return NikkiSkillTrigger
