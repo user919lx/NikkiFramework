@@ -6,10 +6,17 @@ local ResourceAdapter = require("utils/resource_adapter")
 -- 通过全局 Manager 获取 Resolver
 -- ============================================================
 local function GetResolver(self)
-    if not self._resolver and GLOBAL.NikkiManager then
-        self._resolver = GLOBAL.NikkiManager:GetSkillResolver()
+    if not self._resolver and NikkiManager then
+        self._resolver = NikkiManager:GetSkillResolver()
     end
     return self._resolver
+end
+
+local function GetTriggerResolver()
+    if NikkiManager then
+        return NikkiManager:GetTriggerResolver()
+    end
+    return nil
 end
 
 local function on_max_range(self, max_range)
@@ -74,24 +81,82 @@ function NikkiSkill:_OnSkillRemove(skill_id)
     end
 end
 
+-- ============================================================
+-- 添加技能（含 trigger 绑定和子技能递归）
+-- ============================================================
 function NikkiSkill:AddSkills(ids)
     if not ids then return end
 
     for _, id in ipairs(ids) do
         if not self:IsAdded(id) then
+            -- 1. 添加技能本身
             self:_OnSkillAdd(id)
             table.insert(self._active_skills, id)
             log.debug("[NikkiSkill] Added skill '%s' to %s.", tostring(id), tostring(self.inst))
+
+            -- 2. 查询并添加该技能的 trigger 绑定
+            local trigger_resolver = GetTriggerResolver()
+            if trigger_resolver then
+                local triggers = trigger_resolver:GetTriggers(id)
+                if triggers and next(triggers) then
+                    local trigger_comp = self.inst.components.nikki_skill_trigger
+                    if trigger_comp then
+                        for trigger_type, trigger_keys in pairs(triggers) do
+                            for _, trigger_key in ipairs(trigger_keys) do
+                                trigger_comp:Add(trigger_type, trigger_key, id)
+                                log.debug("[NikkiSkill] Added trigger binding: %s[%s] -> %s", trigger_type, trigger_key,
+                                    id)
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- 3. 递归添加子技能
+            local resolver = GetResolver(self)
+            local def = resolver and resolver:GetDef(id)
+            if def and def._sub_skills then
+                self:AddSkills(def._sub_skills)
+            end
         end
     end
     self:_UpdateRangeRadius()
 end
 
+-- ============================================================
+-- 移除技能（含 trigger 绑定移除和子技能递归）
+-- ============================================================
 function NikkiSkill:RemoveSkills(ids)
     if not ids then return end
 
     for _, id in ipairs(ids) do
         if self:IsAdded(id) then
+            -- 1. 先递归移除子技能
+            local resolver = GetResolver(self)
+            local def = resolver and resolver:GetDef(id)
+            if def and def._sub_skills then
+                self:RemoveSkills(def._sub_skills)
+            end
+
+            -- 2. 查询并移除该技能的 trigger 绑定
+            local trigger_resolver = GetTriggerResolver()
+            if trigger_resolver then
+                local triggers = trigger_resolver:GetTriggers(id)
+                if triggers and next(triggers) then
+                    local trigger_comp = self.inst.components.nikki_skill_trigger
+                    if trigger_comp then
+                        for trigger_type, trigger_keys in pairs(triggers) do
+                            for _, trigger_key in ipairs(trigger_keys) do
+                                trigger_comp:Remove(trigger_type, trigger_key, id)
+                                log.debug("[NikkiSkill] Removed trigger binding: %s[%s] -> %s", trigger_type, trigger_key,
+                                    id)
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- 3. 移除技能本身
             self:_OnSkillRemove(id)
             for i, existing_id in ipairs(self._active_skills) do
                 if existing_id == id then

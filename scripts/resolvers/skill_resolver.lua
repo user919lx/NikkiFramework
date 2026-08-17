@@ -26,87 +26,18 @@ local function GetCasterOwner(inst)
     return not TheWorld.ismastersim and ThePlayer or nil
 end
 
--- ============================================================
--- Toggle 辅助函数
--- ============================================================
-local function GenerateToggleEffectId(skill_id)
-    return "_skill_toggle_" .. skill_id
-end
-
 local SkillResolver = Class(BaseResolver, function(self, defs)
     self._resolver_type = "skill"
     self.compiled_wheels = {}
-    self.child_skill_ids = {}
     BaseResolver._ctor(self, defs)
 end)
 
 -- ============================================================
--- Toggle 预处理（编译时）
--- ============================================================
-function SkillResolver:PreprocessToggles(raw_skill_data)
-    if not raw_skill_data or type(raw_skill_data) ~= "table" then
-        return {}, {}
-    end
-
-    local string_toggle_map = {}
-    local inline_effect_defs = {}
-
-    for skill_id, def in pairs(raw_skill_data) do
-        if def.toggle then
-            if type(def.toggle) == "string" then
-                string_toggle_map[skill_id] = def.toggle
-            elseif type(def.toggle) == "table" then
-                local effect_id = GenerateToggleEffectId(skill_id)
-                local effect_def = def.toggle
-                effect_def.stack = { mode = "toggle" }
-                inline_effect_defs[effect_id] = effect_def
-            else
-                log.error("[SkillResolver] Skill '%s' has invalid toggle type: expected string or table. Skipping.",
-                    skill_id)
-            end
-        end
-    end
-
-    return string_toggle_map, inline_effect_defs
-end
-
--- ============================================================
 -- 技能定义添加钩子（编译时）
+-- 注意：default_triggers 和 toggle 已在 manager 层预处理并删除
+--       这里只处理 wheel 编译
 -- ============================================================
 function SkillResolver:OnDefAdded(skill_id, def)
-    -- Toggle 语法糖处理
-    if def.toggle then
-        local effect_id
-
-        if type(def.toggle) == "string" then
-            effect_id = def.toggle
-        elseif type(def.toggle) == "table" then
-            effect_id = GenerateToggleEffectId(skill_id)
-        else
-            log.error("[SkillResolver] Skill '%s' has invalid toggle type. Skipping.", skill_id)
-            return
-        end
-
-        def.fn = function(inst, params, def)
-            -- 这里生成切换 fn，但执行逻辑由组件处理
-            -- 注意：这里不能直接调用 nikki_util.ApplyEffect，因为 Resolver 不执行逻辑
-            -- 实际的 fn 执行由 nikki_skill 组件处理
-            return true
-        end
-        def.toggle = nil
-    end
-
-    -- 语法糖：default_triggers 中的 function 转为 { fn = function }
-    if def.default_triggers then
-        for t_type, t_dict in pairs(def.default_triggers) do
-            for k, v in pairs(t_dict) do
-                if type(v) == "function" then
-                    t_dict[k] = { fn = v }
-                end
-            end
-        end
-    end
-
     -- Wheel 编译
     if type(def.wheel) == "table" and type(def.wheel.ui) == "table" then
         local w_def = def.wheel
@@ -303,21 +234,9 @@ function SkillResolver:GetSkillRange(skill_id)
     return def and def.range or nil
 end
 
-function SkillResolver:GetSkillCooldown(skill_id, trigger_type, trigger_key)
+function SkillResolver:GetSkillCooldown(skill_id)
     local def = self:GetDef(skill_id)
-    if not def then return 0 end
-
-    local ctx = {}
-    if trigger_type and trigger_key and def.default_triggers and def.default_triggers[trigger_type] then
-        local specific = def.default_triggers[trigger_type][trigger_key]
-        if type(specific) == "table" then ctx = specific end
-    end
-
-    local is_custom_fn = (ctx.fn ~= nil)
-    if is_custom_fn then
-        return ctx.cd or 0
-    end
-    return ctx.cd or def.cd or 0
+    return def and def.cd or 0
 end
 
 function SkillResolver:NeedsServer(skill_id)
@@ -328,9 +247,5 @@ function SkillResolver:NeedsServer(skill_id)
     end
     return false
 end
-
--- GetDef 继承自 BaseResolver
--- GetDisplayName 继承自 BaseResolver
--- GetAllIds 继承自 BaseResolver
 
 return SkillResolver
