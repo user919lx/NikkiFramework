@@ -60,6 +60,14 @@ function NikkiSkill:_OnSkillAdd(skill_id)
         end
     end
 
+    if def.effects then
+        for _, effect_id in ipairs(def.effects) do
+            if self.inst.components.nikki_effect then
+                self.inst.components.nikki_effect:Apply(effect_id, self.inst)
+            end
+        end
+    end
+
     if type(def.on_add) == "function" then
         pcall(def.on_add, self.inst, def)
     end
@@ -76,6 +84,14 @@ function NikkiSkill:_OnSkillRemove(skill_id)
         end
     end
 
+    if def.effects then
+        for _, effect_id in ipairs(def.effects) do
+            if self.inst.components.nikki_effect then
+                self.inst.components.nikki_effect:Remove(effect_id, true)
+            end
+        end
+    end
+
     if type(def.on_remove) == "function" then
         pcall(def.on_remove, self.inst, def)
     end
@@ -89,12 +105,10 @@ function NikkiSkill:AddSkills(ids)
 
     for _, id in ipairs(ids) do
         if not self:IsAdded(id) then
-            -- 1. 添加技能本身
             self:_OnSkillAdd(id)
             table.insert(self._active_skills, id)
             log.debug("[NikkiSkill] Added skill '%s' to %s.", tostring(id), tostring(self.inst))
 
-            -- 2. 查询并添加该技能的 trigger 绑定
             local trigger_resolver = GetTriggerResolver()
             if trigger_resolver then
                 local triggers = trigger_resolver:GetTriggers(id)
@@ -112,7 +126,6 @@ function NikkiSkill:AddSkills(ids)
                 end
             end
 
-            -- 3. 递归添加子技能
             local resolver = GetResolver(self)
             local def = resolver and resolver:GetDef(id)
             if def and def._sub_skills then
@@ -131,14 +144,12 @@ function NikkiSkill:RemoveSkills(ids)
 
     for _, id in ipairs(ids) do
         if self:IsAdded(id) then
-            -- 1. 先递归移除子技能
             local resolver = GetResolver(self)
             local def = resolver and resolver:GetDef(id)
             if def and def._sub_skills then
                 self:RemoveSkills(def._sub_skills)
             end
 
-            -- 2. 查询并移除该技能的 trigger 绑定
             local trigger_resolver = GetTriggerResolver()
             if trigger_resolver then
                 local triggers = trigger_resolver:GetTriggers(id)
@@ -156,7 +167,6 @@ function NikkiSkill:RemoveSkills(ids)
                 end
             end
 
-            -- 3. 移除技能本身
             self:_OnSkillRemove(id)
             for i, existing_id in ipairs(self._active_skills) do
                 if existing_id == id then
@@ -222,17 +232,14 @@ end
 -- ============================================================
 
 function NikkiSkill:Execute(skill_id, params)
-    -- 1. 检查技能是否已添加
     if not self:IsAdded(skill_id) then
         return false, "NOT_ADDED"
     end
 
-    -- 2. 检查冷却
     if self:IsOnCooldown(skill_id) then
         return false, "ON_COOLDOWN"
     end
 
-    -- 3. 获取技能定义
     local resolver = GetResolver(self)
     if not resolver then
         return false, "RESOLVER_NOT_FOUND"
@@ -243,7 +250,6 @@ function NikkiSkill:Execute(skill_id, params)
         return false, "SKILL_NOT_FOUND"
     end
 
-    -- 4. 检查前置标签
     if def.required_tags then
         for _, tag in ipairs(def.required_tags) do
             if not self.inst:HasTag(tag) then
@@ -252,7 +258,6 @@ function NikkiSkill:Execute(skill_id, params)
         end
     end
 
-    -- 5. 检查资源消耗
     if def.cost and def.cost.res and def.cost.amount and def.cost.amount > 0 then
         local current = ResourceAdapter.GetCurrent(self.inst, def.cost.res)
         if current < def.cost.amount then
@@ -260,7 +265,6 @@ function NikkiSkill:Execute(skill_id, params)
         end
     end
 
-    -- 6. 执行技能函数
     if def.fn then
         local success, result, err = pcall(def.fn, self.inst, params, def)
         if not success then
@@ -271,12 +275,10 @@ function NikkiSkill:Execute(skill_id, params)
         end
     end
 
-    -- 7. 扣除资源（在 fn 执行之后）
     if def.cost and def.cost.res and def.cost.amount and def.cost.amount > 0 then
         ResourceAdapter.DoDelta(self.inst, def.cost.res, -def.cost.amount)
     end
 
-    -- 8. 启动冷却
     if def.cd and def.cd > 0 then
         self:StartCooldown(skill_id, def.cd)
     end

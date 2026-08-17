@@ -75,12 +75,20 @@ function NikkiManager:RegisterMod(config, mod_env)
     self:_RegisterExtensions(config, mod_env)
     self:_LoadDefs(config)
 
+    -- 提取 basic 和 default
+    local basic_state = "basic"
     local default_state = "default"
-    if config.defs and config.defs.state and type(config.defs.state) == "table" and config.defs.state.default then
-        default_state = config.defs.state.default
+
+    if config.defs and config.defs.state and type(config.defs.state) == "table" then
+        if config.defs.state.basic then
+            basic_state = config.defs.state.basic
+        end
+        if config.defs.state.default then
+            default_state = config.defs.state.default
+        end
     end
 
-    self:_ApplyTo(config, mod_env, default_state)
+    self:_ApplyTo(config, mod_env, basic_state, default_state)
 
     log.info("[NikkiManager] Mod registered.")
 end
@@ -215,7 +223,7 @@ function NikkiManager:_LoadDefs(config)
 
     local raw_skill_data = nil
 
-    -- 1. 加载 Effect（直接注册）
+    -- 1. 加载 Effect
     if defs.effect then
         local effect_data = require(defs.effect)
         if effect_data then
@@ -224,17 +232,16 @@ function NikkiManager:_LoadDefs(config)
         end
     end
 
-    -- 2. 加载并编译 Skill（一次性收集，最后统一注册）
+    -- 2. 加载并编译 Skill
     if defs.skill then
         raw_skill_data = require(defs.skill)
         if raw_skill_data then
-            local all_skills = {}   -- 所有技能定义（主技能 + 子技能）
-            local trigger_data = {} -- trigger 映射：skill_id → { events = {...}, actions = {...} }
-            local effect_defs = {}  -- toggle 生成的 Effect 定义
+            local all_skills = {}
+            local trigger_data = {}
+            local effect_defs = {}
 
             for skill_id, def in pairs(raw_skill_data) do
                 if def then
-                    -- 处理 toggle
                     local toggle_result = self:_ProcessToggle(skill_id, def)
                     if toggle_result then
                         if toggle_result.effect_def then
@@ -247,7 +254,6 @@ function NikkiManager:_LoadDefs(config)
                         def.toggle = nil
                     end
 
-                    -- 处理 default_triggers
                     local processed_def, triggers, sub_skills = self:_ProcessDefaultTriggers(skill_id, def)
                     all_skills[skill_id] = processed_def
                     if triggers and next(triggers) then
@@ -275,11 +281,18 @@ function NikkiManager:_LoadDefs(config)
         end
     end
 
-    -- 3. 加载 State
+    -- 3. 加载 State（直接 require 并 AddDefs）
     if defs.state then
         local state_cfg = defs.state
-        self.state_resolver:AddStateConfig(state_cfg, raw_skill_data)
-        log.debug("[NikkiManager] Loaded states.")
+        local state_file = type(state_cfg) == "table" and state_cfg.file or
+            (type(state_cfg) == "string" and state_cfg or nil)
+        if state_file then
+            local raw_state_data = require(state_file)
+            if raw_state_data then
+                self.state_resolver:AddDefs(raw_state_data)
+                log.debug("[NikkiManager] Loaded states from '%s'.", state_file)
+            end
+        end
     end
 end
 
@@ -410,7 +423,7 @@ end
 -- ============================================================
 -- 装配分发
 -- ============================================================
-function NikkiManager:_ApplyTo(config, mod_env, default_state)
+function NikkiManager:_ApplyTo(config, mod_env, basic_state, default_state)
     local apply_to = config.apply_to or {}
     local custom_resources = config.custom_resources
 
@@ -419,7 +432,7 @@ function NikkiManager:_ApplyTo(config, mod_env, default_state)
             if type(tier_cfg.prefabs) == "table" then
                 for _, prefab in ipairs(tier_cfg.prefabs) do
                     mod_env.AddPrefabPostInit(prefab, function(inst)
-                        self:ApplyFrameworkToInst(inst, tier_name, custom_resources, default_state)
+                        self:ApplyFrameworkToInst(inst, tier_name, custom_resources, basic_state, default_state)
                     end)
                 end
             end
@@ -427,7 +440,7 @@ function NikkiManager:_ApplyTo(config, mod_env, default_state)
                 local tag_name = tier_cfg.tag
                 mod_env.AddPrefabPostInitAny(function(inst)
                     if inst.HasTag and inst:HasTag(tag_name) then
-                        self:ApplyFrameworkToInst(inst, tier_name, custom_resources, default_state)
+                        self:ApplyFrameworkToInst(inst, tier_name, custom_resources, basic_state, default_state)
                     end
                 end)
             end
@@ -435,7 +448,7 @@ function NikkiManager:_ApplyTo(config, mod_env, default_state)
     end
 end
 
-function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources, default_state)
+function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources, basic_state, default_state)
     local TIER_LEVELS = { skill = 2, player = 3 }
     local tier_level = TIER_LEVELS[tier_name] or 0
 
@@ -469,6 +482,11 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources, de
     if not inst.components.nikki_skill then inst:AddComponent("nikki_skill") end
     if not inst.components.nikki_skill_trigger then inst:AddComponent("nikki_skill_trigger") end
     if not inst.components.nikki_state then inst:AddComponent("nikki_state") end
+
+    -- 应用 basic 状态
+    if inst.components.nikki_state and basic_state then
+        inst.components.nikki_state:ApplyBasic(basic_state)
+    end
 
     if inst.components.nikki_state and default_state then
         inst.components.nikki_state:SetDefaultState(default_state)
