@@ -42,7 +42,7 @@ if not GLOBAL.TheNet:IsDedicated() then
         if not self.owner:HasTag("nikki_framework") then return end
         -- 可调参数
         local DEFAULT_BADGE_SPACING = 62 -- 默认徽章间距
-        local VERTICAL_MARGIN = 52       -- 徽章底部到按钮的边距（逻辑像素）
+        local VERTICAL_MARGIN = 70       -- 徽章底部到按钮的边距（逻辑像素）
 
         -- 私有成员
         self._nikki_badges = {}
