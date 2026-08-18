@@ -265,7 +265,6 @@ function NikkiSkill:TryExecute(skill_id, params)
     act._skill_id = skill_id
     act._skill_state = action_def.state or "doshortaction"
     act._display_name = resolver:GetDisplayName(skill_id)
-    act._raw_params = params
 
     -- 6. 推送到 locomotor
     local pc = self.inst.components.playercontroller

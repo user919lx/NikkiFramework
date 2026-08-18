@@ -20,11 +20,18 @@ NikkiManager:Init(env)
 GLOBAL.NikkiManager = NikkiManager
 
 
-AddModRPCHandler("NikkiFramework", "CastKey", function(player, key)
-    if player and player.components.nikki_skill_trigger then
-        player.components.nikki_skill_trigger:Trigger("keys", key)
+AddModRPCHandler("NikkiFramework", "TryExecuteSkill", function(player, skill_id, target, x, z)
+    local skill_comp = player.components.nikki_skill
+    if not skill_comp then
+        return
     end
+    local pos = nil
+    if x and z then
+        pos = GLOBAL.Vector3(x, 0, z)
+    end
+    skill_comp:TryExecute(skill_id, { target = target, pos = pos })
 end)
+
 
 
 if not GLOBAL.TheNet:IsDedicated() then
@@ -96,7 +103,6 @@ if not GLOBAL.TheNet:IsDedicated() then
                     if not groups[y] then
                         groups[y] = {}
                     end
-                    log.debug("_Nikki_CalcLayoutParams: badge %s at (%.2f, %.2f)", badge, x, y)
                     table.insert(groups[y], x)
                 end
             end

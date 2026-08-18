@@ -7,12 +7,13 @@ local all_actions = {
             if doer == nil or not doer.components.nikki_skill then
                 return false, "NO_SKILL_COMPONENT"
             end
-            local params = act._raw_params
-            params.act = act
-            params.target = params.target or act.target
-            params.pos = params.pos or act:GetActionPoint()
-            params.doer = doer
-            params.invobject = act.invobject
+            local params = {
+                act = act,
+                target = act.target,
+                pos = act:GetActionPoint(),
+                doer = act.doer,
+                invobject = act.invobject,
+            }
             return doer.components.nikki_skill:Execute(act._skill_id, params)
         end,
         state = function(inst, act)

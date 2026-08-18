@@ -86,9 +86,6 @@ function NikkiSkillTrigger:_RefreshKeys(current_state, old_state)
             self:AddKey(key_code, skill_id)
         end
     end
-
-    log.debug("[NikkiSkillTrigger Replica] Refreshed keys for state '%s' (old_state=%s)", current_state,
-        tostring(old_state))
 end
 
 function NikkiSkillTrigger:GetSkillsForKey(key_code)
@@ -139,17 +136,18 @@ end
 -- 按键触发（客户端处理）
 -- ============================================================
 function NikkiSkillTrigger:CastKey(key)
+    if self.inst.components.nikki_skill_trigger then
+        return self.inst.components.nikki_skill_trigger:Trigger("keys", key)
+    end
     local skill_id = self:GetSkillsForKey(key)
     if not skill_id then
         return false
     end
-
     local def = self.inst.replica.nikki_skill and self.inst.replica.nikki_skill:GetSkillDef(skill_id)
     if not def then
         log.debug("[NikkiSkillTrigger Replica] Skill definition not found for skill_id '%s'", skill_id)
         return false
     end
-
     if def.targeting then
         if def.targeting.mode == "target" then
             if self:IsAiming() then
@@ -162,10 +160,7 @@ function NikkiSkillTrigger:CastKey(key)
             return true
         end
     end
-
-    log.debug("[NikkiSkillTrigger Replica] Try casting skill '%s' for key '%s'", skill_id, key)
-    SendModRPCToServer(GetModRPC("NikkiFramework", "CastKey"), key)
-    return true
+    return self.inst.replica.nikki_skill:TryExecute(skill_id, {})
 end
 
 
