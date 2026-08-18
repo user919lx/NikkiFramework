@@ -18,16 +18,19 @@ local NikkiSkillTrigger = Class(function(self, inst)
         local old_state = data and data.old_state
         self:_RefreshKeys(state, old_state)
     end)
-
-    -- 延迟执行初始刷新，传入 basic 状态
-    self.inst:DoTaskInTime(0, function()
-        local resolver = self._resolver
-        if resolver then
-            local basic_state = resolver:GetBasicState()
-            self:_RefreshKeys(basic_state, nil)
-        end
-    end)
 end)
+
+function NikkiSkillTrigger:Init(resolver)
+    if not resolver then
+        log.warn("[NikkiSkillTrigger Replica] No resolver provided during Init.")
+        return
+    end
+    self._resolver = resolver
+    -- 刷新 Basic State 按键
+    self:_RefreshKeys(self._resolver:GetBasicState(), nil)
+    -- 刷新当前 State 按键
+    self:_RefreshKeys()
+end
 
 function NikkiSkillTrigger:AddKey(key_code, skill_id)
     self._keys[key_code] = skill_id
@@ -38,20 +41,23 @@ function NikkiSkillTrigger:RemoveKey(key_code)
 end
 
 function NikkiSkillTrigger:_RefreshKeys(current_state, old_state)
+    log.debug("[NikkiSkillTrigger Replica] Refreshing keys for state '%s' (old_state=%s)", current_state,
+        tostring(old_state))
     local resolver = self._resolver
     if not resolver then
+        log.debug("[NikkiSkillTrigger Replica] No resolver available to refresh keys.")
         return
     end
 
     if not current_state then
-        local state_comp = self.inst.components.nikki_state
+        local state_comp = self.inst.replica.nikki_state
         if state_comp then
             current_state = state_comp:GetState()
         end
-    end
-    if not current_state then
-        log.debug("[NikkiSkillTrigger Replica] No state available to refresh keys.")
-        return
+        if not current_state then
+            log.debug("[NikkiSkillTrigger Replica] No state available to refresh keys.")
+            return
+        end
     end
 
     if old_state then
@@ -75,7 +81,8 @@ function NikkiSkillTrigger:_RefreshKeys(current_state, old_state)
         end
     end
 
-    log.debug("[NikkiSkillTrigger Replica] Refreshed keys for state '%s' (old_state=%s)", current_state, tostring(old_state))
+    log.debug("[NikkiSkillTrigger Replica] Refreshed keys for state '%s' (old_state=%s)", current_state,
+        tostring(old_state))
 end
 
 function NikkiSkillTrigger:GetSkillsForKey(key_code)
@@ -88,14 +95,14 @@ end
 function NikkiSkillTrigger:EnterAiming(skill_id)
     self._aiming = true
     self._aiming_skill = skill_id
-    self.inst:AddTag("aiming_point")
+    self.inst:AddTag("aiming_target")
     log.debug("[NikkiSkillTrigger Replica] Enter aiming for skill: %s", skill_id)
 end
 
 function NikkiSkillTrigger:ExitAiming()
     self._aiming = false
     self._aiming_skill = nil
-    self.inst:RemoveTag("aiming_point")
+    self.inst:RemoveTag("aiming_target")
     log.debug("[NikkiSkillTrigger Replica] Exit aiming")
 end
 
@@ -117,24 +124,24 @@ function NikkiSkillTrigger:CastKey(key)
         return false
     end
 
-    local resolver = self._resolver
-    if not resolver then
-        log.error("[NikkiSkillTrigger Replica] Skill resolver not available.")
-        return false
-    end
-
-    local def = resolver:GetDef(skill_id)
+    local def = self.inst.replica.nikki_skill and self.inst.replica.nikki_skill:GetSkillDef(skill_id)
     if not def then
         log.debug("[NikkiSkillTrigger Replica] Skill definition not found for skill_id '%s'", skill_id)
         return false
     end
 
     -- 检查是否需要瞄准
-    if def.targeting and def.targeting.mode == "point" then
-        self:EnterAiming(skill_id)
-        self.inst:PushEvent("nikki_aiming_start", { skill_id = skill_id })
-        log.debug("[NikkiSkillTrigger Replica] Skill '%s' requires aiming. Entering aiming mode.", skill_id)
-        return true
+    if def.targeting then
+        if def.targeting.mode == "target" then
+            if self:IsAiming() then
+                self:ExitAiming()
+                log.debug("[NikkiSkillTrigger Replica] Skill '%s' exits aiming mode.", skill_id)
+            else
+                self:EnterAiming(skill_id)
+                log.debug("[NikkiSkillTrigger Replica] Skill '%s' enters aiming mode.", skill_id)
+            end
+            return true
+        end
     end
 
     log.debug("[NikkiSkillTrigger Replica] Casting skill '%s' for key '%s'", skill_id, key)

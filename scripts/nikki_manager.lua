@@ -21,19 +21,24 @@ end
 
 local function LeftClickOverride(inst, target, pos)
     if inst and inst.replica.nikki_skill_trigger then
-        local trigger = inst.replica.nikki_skill_trigger
-        local aiming = trigger._aiming
-        local skill_id = trigger._aiming_skill
+        local replica_trigger = inst.replica.nikki_skill_trigger
+        local replica_skill = inst.replica.nikki_skill
+        local aiming = replica_trigger._aiming
+        local skill_id = replica_trigger._aiming_skill
         local actions = {}
-        if inst:HasTag("aiming_point") then
-            table.insert(actions, ACTIONS.TARGETING)
-            target = pos
+        if aiming and target and target:IsValid() then
+            local skill_def = replica_skill and replica_skill:GetSkillDef(skill_id)
+            local distance = skill_def.range or ACTIONS.TARGETING.distance
+            local act = BufferedAction(inst, target, ACTIONS.TARGETING, nil, nil, nil, distance, nil, nil)
+            act.skill_fn = skill_def.fn
+            act.skill_def = skill_def
+            table.insert(actions, act)
         end
         if #actions > 0 then
-            return inst.components.playeractionpicker:SortActionList(actions, target)
+            return actions
         end
-        return {}, true
     end
+    return {}, true
 end
 
 -- ============================================================
@@ -624,11 +629,14 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
                 indicator:SetOwner(inst, self:GetSetting("show_range"))
                 inst.components.playeractionpicker.leftclickoverride = LeftClickOverride
                 if inst.replica then
+                    if inst.replica.nikki_skill then
+                        inst.replica.nikki_skill._resolver = self.skill_resolver
+                    end
                     if inst.replica.nikki_state then
                         inst.replica.nikki_state._resolver = self.state_resolver
                     end
                     if inst.replica.nikki_skill_trigger then
-                        inst.replica.nikki_skill_trigger._resolver = self.state_resolver
+                        inst.replica.nikki_skill_trigger:Init(self.state_resolver)
                     end
                     if inst.replica.nikki_skillwheel then
                         inst.replica.nikki_skillwheel._resolver = self.skill_resolver
@@ -655,21 +663,21 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
 
     if not inst.components.nikki_effect then
         inst:AddComponent("nikki_effect")
-        inst.components.nikki_effect._resolver = self.effect_resolver
     end
     if not inst.components.nikki_skill then
         inst:AddComponent("nikki_skill")
-        inst.components.nikki_skill._resolver = self.skill_resolver
-        inst.components.nikki_skill._trigger_resolver = self.trigger_resolver
     end
     if not inst.components.nikki_skill_trigger then
         inst:AddComponent("nikki_skill_trigger")
-        inst.components.nikki_skill_trigger._resolver = self.state_resolver
     end
     if not inst.components.nikki_state then
         inst:AddComponent("nikki_state")
-        inst.components.nikki_state._resolver = self.state_resolver
     end
+    inst.components.nikki_effect._resolver = self.effect_resolver
+    inst.components.nikki_skill._resolver = self.skill_resolver
+    inst.components.nikki_skill._trigger_resolver = self.trigger_resolver
+    inst.components.nikki_skill_trigger._resolver = self.state_resolver
+    inst.components.nikki_state._resolver = self.state_resolver
 
     -- 从 resolver 获取 basic/default
     local basic_state = self.state_resolver:GetBasicState()
