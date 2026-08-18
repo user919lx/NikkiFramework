@@ -225,7 +225,6 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
             end
         end
     end
-
     return item
 end
 

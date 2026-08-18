@@ -20,18 +20,19 @@ local function GenerateToggleEffectId(skill_id)
 end
 
 local function LeftClickOverride(inst, target, pos)
-    if inst and inst.replica.nikki_skill_trigger then
+    if inst and inst.replica.nikki_skill_trigger and target and target:IsValid() then
         local replica_trigger = inst.replica.nikki_skill_trigger
-        local replica_skill = inst.replica.nikki_skill
-        local aiming = replica_trigger._aiming
-        local skill_id = replica_trigger._aiming_skill
         local actions = {}
-        if aiming and target and target:IsValid() then
+        if replica_trigger and replica_trigger:IsAiming() then
+            local skill_id = replica_trigger:GetAimingSkill()
+            local replica_skill = inst.replica.nikki_skill
             local skill_def = replica_skill and replica_skill:GetSkillDef(skill_id)
             local distance = skill_def.range or ACTIONS.TARGETING.distance
             local act = BufferedAction(inst, target, ACTIONS.TARGETING, nil, nil, nil, distance, nil, nil)
             act.skill_fn = skill_def.fn
             act.skill_def = skill_def
+            act.skill_name = replica_skill:GetSkillName(skill_id) or skill_id
+            act.skill_state = "dolongaction"
             table.insert(actions, act)
         end
         if #actions > 0 then
@@ -625,8 +626,12 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
         -- HUD 处理
         inst:DoTaskInTime(0, function()
             if not TheNet:IsDedicated() and inst == ThePlayer then
-                local indicator = SpawnPrefab("nikki_range_indicator")
-                indicator:SetOwner(inst, self:GetSetting("show_range"))
+                if not inst.range_indicator or not inst.range_indicator:IsValid() then
+                    local indicator = SpawnPrefab("nikki_range_indicator")
+                    indicator:SetOwner(inst)
+                    inst.range_indicator = indicator
+                end
+                inst:PushEvent("skill_range_toggle_changed", { new_state = self:GetSetting("show_range") })
                 inst.components.playeractionpicker.leftclickoverride = LeftClickOverride
                 if inst.replica then
                     if inst.replica.nikki_skill then

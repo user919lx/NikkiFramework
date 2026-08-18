@@ -27,6 +27,15 @@ function NikkiSkill:GetSkillDef(id)
         return self._resolver:GetDef(id)
     end
 end
-
+function NikkiSkill:GetSkillRange(id)
+    if self._resolver then
+        return self._resolver:GetSkillRange(id)
+    end
+end
+function NikkiSkill:GetSkillName(id)
+    if self._resolver then
+        return self._resolver:GetDisplayName(id)
+    end
+end
 
 return NikkiSkill

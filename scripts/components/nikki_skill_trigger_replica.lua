@@ -1,14 +1,20 @@
 -- scripts/components/nikki_skill_trigger_replica.lua
 local log = require("utils/log")
 
+local function GetRangeIndicator (inst)
+    if inst.range_indicator then
+        return inst.range_indicator
+    end
+    local indicator = SpawnPrefab("nikki_range_indicator")
+    indicator:SetOwner(inst)
+    inst.range_indicator = indicator
+    return indicator
+end
 
 local NikkiSkillTrigger = Class(function(self, inst)
     self.inst = inst
 
-    -- 按键映射缓存（客户端）
     self._keys = {}
-
-    -- 瞄准状态（客户端）
     self._aiming = false
     self._aiming_skill = nil
     self._aiming_params = nil
@@ -17,6 +23,7 @@ local NikkiSkillTrigger = Class(function(self, inst)
         local state = data and data.state
         local old_state = data and data.old_state
         self:_RefreshKeys(state, old_state)
+        self:ExitAiming()
     end)
 end)
 
@@ -26,10 +33,9 @@ function NikkiSkillTrigger:Init(resolver)
         return
     end
     self._resolver = resolver
-    -- 刷新 Basic State 按键
     self:_RefreshKeys(self._resolver:GetBasicState(), nil)
-    -- 刷新当前 State 按键
     self:_RefreshKeys()
+    self:ExitAiming()
 end
 
 function NikkiSkillTrigger:AddKey(key_code, skill_id)
@@ -89,21 +95,36 @@ function NikkiSkillTrigger:GetSkillsForKey(key_code)
     return self._keys[key_code]
 end
 
+
 -- ============================================================
 -- 瞄准状态管理（客户端）
 -- ============================================================
 function NikkiSkillTrigger:EnterAiming(skill_id)
     self._aiming = true
     self._aiming_skill = skill_id
-    self.inst:AddTag("aiming_target")
     log.debug("[NikkiSkillTrigger Replica] Enter aiming for skill: %s", skill_id)
+
+    local indicator = GetRangeIndicator(self.inst)
+    if indicator then
+        local range = self.inst.replica.nikki_skill and self.inst.replica.nikki_skill:GetSkillRange(skill_id)
+        if range and range > 0 then
+            indicator:EnterOverride(range)
+        else
+            log.debug("[NikkiSkillTrigger Replica] Skill '%s' has no range, not overriding indicator", skill_id)
+        end
+    else
+        log.debug("[NikkiSkillTrigger Replica] No range indicator found on owner")
+    end
 end
 
 function NikkiSkillTrigger:ExitAiming()
     self._aiming = false
     self._aiming_skill = nil
-    self.inst:RemoveTag("aiming_target")
     log.debug("[NikkiSkillTrigger Replica] Exit aiming")
+    local indicator = GetRangeIndicator(self.inst)
+    if indicator then
+        indicator:ExitOverride()
+    end
 end
 
 function NikkiSkillTrigger:IsAiming()
@@ -130,7 +151,6 @@ function NikkiSkillTrigger:CastKey(key)
         return false
     end
 
-    -- 检查是否需要瞄准
     if def.targeting then
         if def.targeting.mode == "target" then
             if self:IsAiming() then
@@ -145,7 +165,6 @@ function NikkiSkillTrigger:CastKey(key)
     end
 
     log.debug("[NikkiSkillTrigger Replica] Casting skill '%s' for key '%s'", skill_id, key)
-    -- 瞬发：发送 RPC 到服务端
     SendModRPCToServer(GetModRPC("NikkiFramework", "CastKey"), key)
     return true
 end

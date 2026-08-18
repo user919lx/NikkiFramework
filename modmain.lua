@@ -186,6 +186,8 @@ if not GLOBAL.TheNet:IsDedicated() then
     end)
 end
 
+local default_config = require("defs/default_config")
+NikkiManager:RegisterMod(default_config, env)
 
 if not is_debug_mode then
     return
