@@ -2,23 +2,6 @@
 local log = require("utils/log")
 local ResourceAdapter = require("utils/resource_adapter")
 
--- ============================================================
--- 通过全局 Manager 获取 Resolver
--- ============================================================
-local function GetResolver(self)
-    if not self._resolver and NikkiManager then
-        self._resolver = NikkiManager:GetSkillResolver()
-    end
-    return self._resolver
-end
-
-local function GetTriggerResolver()
-    if NikkiManager then
-        return NikkiManager:GetTriggerResolver()
-    end
-    return nil
-end
-
 local function on_max_range(self, max_range)
     if self.inst.replica.nikki_skill then
         self.inst.replica.nikki_skill:SetMaxRange(max_range)
@@ -30,7 +13,8 @@ local NikkiSkill = Class(function(self, inst)
         self.inst = inst
         self.max_range = 0
         self._active_skills = {}
-        self._resolver = nil
+        self._resolver = nil         -- 由 Manager 注入
+        self._trigger_resolver = nil -- 由 Manager 注入
         self._cooldowns = {}
     end,
     nil,
@@ -50,8 +34,8 @@ function NikkiSkill:IsAdded(skill_id)
 end
 
 function NikkiSkill:_OnSkillAdd(skill_id)
-    local resolver = GetResolver(self)
-    local def = resolver:GetDef(skill_id)
+    local resolver = self._resolver
+    local def = resolver and resolver:GetDef(skill_id)
     if not def then return end
 
     if def.tags then
@@ -74,8 +58,8 @@ function NikkiSkill:_OnSkillAdd(skill_id)
 end
 
 function NikkiSkill:_OnSkillRemove(skill_id)
-    local resolver = GetResolver(self)
-    local def = resolver:GetDef(skill_id)
+    local resolver = self._resolver
+    local def = resolver and resolver:GetDef(skill_id)
     if not def then return end
 
     if def.tags then
@@ -102,14 +86,13 @@ end
 -- ============================================================
 function NikkiSkill:AddSkills(ids)
     if not ids then return end
-
+    local resolver = self._resolver
+    local trigger_resolver = self._trigger_resolver
     for _, id in ipairs(ids) do
         if not self:IsAdded(id) then
             self:_OnSkillAdd(id)
             table.insert(self._active_skills, id)
             log.debug("[NikkiSkill] Added skill '%s' to %s.", tostring(id), tostring(self.inst))
-
-            local trigger_resolver = GetTriggerResolver()
             if trigger_resolver then
                 local triggers = trigger_resolver:GetTriggers(id)
                 if triggers and next(triggers) then
@@ -125,8 +108,6 @@ function NikkiSkill:AddSkills(ids)
                     end
                 end
             end
-
-            local resolver = GetResolver(self)
             local def = resolver and resolver:GetDef(id)
             if def and def._sub_skills then
                 self:AddSkills(def._sub_skills)
@@ -144,13 +125,13 @@ function NikkiSkill:RemoveSkills(ids)
 
     for _, id in ipairs(ids) do
         if self:IsAdded(id) then
-            local resolver = GetResolver(self)
+            local resolver = self._resolver
             local def = resolver and resolver:GetDef(id)
             if def and def._sub_skills then
                 self:RemoveSkills(def._sub_skills)
             end
 
-            local trigger_resolver = GetTriggerResolver()
+            local trigger_resolver = self._trigger_resolver
             if trigger_resolver then
                 local triggers = trigger_resolver:GetTriggers(id)
                 if triggers and next(triggers) then
@@ -182,7 +163,7 @@ function NikkiSkill:RemoveSkills(ids)
 end
 
 function NikkiSkill:_UpdateRangeRadius()
-    local resolver = GetResolver(self)
+    local resolver = self._resolver
     if not resolver then return end
 
     local max_range = 0
@@ -240,7 +221,7 @@ function NikkiSkill:Execute(skill_id, params)
         return false, "ON_COOLDOWN"
     end
 
-    local resolver = GetResolver(self)
+    local resolver = self._resolver
     if not resolver then
         return false, "RESOLVER_NOT_FOUND"
     end

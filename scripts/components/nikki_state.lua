@@ -1,12 +1,5 @@
 local log = require("utils/log")
 
-local function GetResolver(self)
-    if not self._resolver and NikkiManager then
-        self._resolver = NikkiManager:GetStateResolver()
-    end
-    return self._resolver
-end
-
 local function on_state(self, state)
     local old_state = self._last_state
     if self.inst.replica.nikki_state then
@@ -21,7 +14,7 @@ local NikkiState = Class(function(self, inst)
         self.default_state = "default"
         self.basic_applied = false
 
-        self._resolver = nil
+        self._resolver = nil -- 由 Manager 注入
         self._active_overlay_skills = {}
         self._active_tags = {}
 
@@ -67,7 +60,7 @@ function NikkiState:SetState(state, force)
 end
 
 function NikkiState:RefreshOverlay()
-    local resolver = GetResolver(self)
+    local resolver = self._resolver
     if not resolver then return end
     local def = resolver:GetStateDef(self.state)
     self:ApplyStateDef(def)
@@ -151,7 +144,7 @@ function NikkiState:ApplyBasic(basic_state_name)
         return
     end
 
-    local resolver = GetResolver(self)
+    local resolver = self._resolver
     if not resolver then
         return
     end

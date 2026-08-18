@@ -19,6 +19,23 @@ local function GenerateToggleEffectId(skill_id)
     return "_skill_toggle_" .. skill_id
 end
 
+local function LeftClickOverride(inst, target, pos)
+    if inst and inst.replica.nikki_skill_trigger then
+        local trigger = inst.replica.nikki_skill_trigger
+        local aiming = trigger._aiming
+        local skill_id = trigger._aiming_skill
+        local actions = {}
+        if inst:HasTag("aiming_point") then
+            table.insert(actions, ACTIONS.TARGETING)
+            target = pos
+        end
+        if #actions > 0 then
+            return inst.components.playeractionpicker:SortActionList(actions, target)
+        end
+        return {}, true
+    end
+end
+
 -- ============================================================
 -- 统一管理器（全局单例）
 -- ============================================================
@@ -605,17 +622,7 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
             if not TheNet:IsDedicated() and inst == ThePlayer then
                 local indicator = SpawnPrefab("nikki_range_indicator")
                 indicator:Attach(inst)
-                inst.components.playeractionpicker.leftclickoverride = function(inst, target, position)
-                    local actions = {}
-                    if inst:HasTag("aiming_point") then
-                        table.insert(actions, ACTIONS.TARGETING)
-                        target = position
-                    end
-                    if #actions > 0 then
-                        return inst.components.playeractionpicker:SortActionList(actions, target)
-                    end
-                    return {}, true
-                end
+                inst.components.playeractionpicker.leftclickoverride = LeftClickOverride
             end
         end)
     end
@@ -635,10 +642,23 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
         end
     end
 
-    if not inst.components.nikki_effect then inst:AddComponent("nikki_effect") end
-    if not inst.components.nikki_skill then inst:AddComponent("nikki_skill") end
-    if not inst.components.nikki_skill_trigger then inst:AddComponent("nikki_skill_trigger") end
-    if not inst.components.nikki_state then inst:AddComponent("nikki_state") end
+    if not inst.components.nikki_effect then
+        inst:AddComponent("nikki_effect")
+        inst.components.nikki_effect._resolver = self.effect_resolver
+    end
+    if not inst.components.nikki_skill then
+        inst:AddComponent("nikki_skill")
+        inst.components.nikki_skill._resolver = self.skill_resolver
+        inst.components.nikki_skill._trigger_resolver = self.trigger_resolver
+    end
+    if not inst.components.nikki_skill_trigger then
+        inst:AddComponent("nikki_skill_trigger")
+        inst.components.nikki_skill_trigger._resolver = self.state_resolver
+    end
+    if not inst.components.nikki_state then
+        inst:AddComponent("nikki_state")
+        inst.components.nikki_state._resolver = self.state_resolver
+    end
 
     -- 从 resolver 获取 basic/default
     local basic_state = self.state_resolver:GetBasicState()

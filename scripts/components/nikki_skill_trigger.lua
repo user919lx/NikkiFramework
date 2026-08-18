@@ -1,15 +1,9 @@
 -- scripts/components/nikki_skill_trigger.lua
 local log = require("utils/log")
 
-local function GetStateResolver()
-    if NikkiManager then
-        return NikkiManager:GetStateResolver()
-    end
-    return nil
-end
-
 local NikkiSkillTrigger = Class(function(self, inst)
     self.inst = inst
+    self._resolver = nil  -- 由 Manager 注入
 
     self.triggers = {
         keys = {},
@@ -26,7 +20,7 @@ local NikkiSkillTrigger = Class(function(self, inst)
 
     -- 延迟执行初始刷新，传入 basic 状态
     self.inst:DoTaskInTime(0, function()
-        local resolver = GetStateResolver()
+        local resolver = self._resolver
         if resolver then
             local basic_state = resolver:GetBasicState()
             self:_RefreshKeys(basic_state, nil)
@@ -119,7 +113,7 @@ end
 -- 刷新 keys 绑定（支持 state 覆盖，但内部有 fallback）
 -- ============================================================
 function NikkiSkillTrigger:_RefreshKeys(current_state, old_state)
-    local resolver = GetStateResolver()
+    local resolver = self._resolver
     if not resolver then
         return
     end

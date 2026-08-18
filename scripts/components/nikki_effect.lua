@@ -129,15 +129,9 @@ local function SpawnAuraFx(inst, def, context)
     context._aura_fx = fx
     return fx
 end
-
--- ============================================================
--- 通过全局 Manager 获取 Resolver
--- ============================================================
-local function GetResolver(self)
-    if not self._resolver and NikkiManager then
-        self._resolver = NikkiManager:GetEffectResolver()
-    end
-    return self._resolver
+local function GetDef(self, id)
+    if not self._resolver then return nil end
+    return self._resolver:GetDef(id)
 end
 
 local NikkiEffect = Class(function(self, inst)
@@ -181,7 +175,7 @@ end
 -- ============================================================
 
 function NikkiEffect:_PayActivationCost(id)
-    local def = GetResolver(self):GetDef(id)
+    local def = GetDef(self, id)
     if not def or not def.cost or not def.cost.res or not def.cost.amount or def.cost.amount <= 0 then
         return true
     end
@@ -197,8 +191,7 @@ function NikkiEffect:_PayActivationCost(id)
 end
 
 function NikkiEffect:_OnEffectStart(id, context)
-    local resolver = GetResolver(self)
-    local def = resolver:GetDef(id)
+    local def = GetDef(self, id)
     if not def then return end
 
     if def.tags then
@@ -216,8 +209,7 @@ function NikkiEffect:_OnEffectStart(id, context)
 end
 
 function NikkiEffect:_OnEffectEnd(id, context)
-    local resolver = GetResolver(self)
-    local def = resolver:GetDef(id)
+    local def = GetDef(self, id)
     if not def then return end
 
     if def.aura and def.aura.on_leave and context._aura_prev_targets then
@@ -251,8 +243,7 @@ function NikkiEffect:_OnEffectEnd(id, context)
 end
 
 function NikkiEffect:_UpdateEffectLayers(id, layers, context)
-    local resolver = GetResolver(self)
-    local def = resolver:GetDef(id)
+    local def = GetDef(self, id)
     if not def then return end
 
     if def.mods then
@@ -274,8 +265,7 @@ function NikkiEffect:_UpdateEffectLayers(id, layers, context)
 end
 
 function NikkiEffect:_OnUpdateEffect(id, dt, context, layers)
-    local resolver = GetResolver(self)
-    local def = resolver:GetDef(id)
+    local def = GetDef(self, id)
     if not def then return false end
 
     -- drain 资源耗尽检查
@@ -325,7 +315,7 @@ end
 -- ============================================================
 
 function NikkiEffect:Apply(id, source)
-    local resolver = GetResolver(self)
+    local resolver = self._resolver
     if not resolver then return false end
 
     if self.inst.components.health and self.inst.components.health:IsDead() then
@@ -436,8 +426,6 @@ function NikkiEffect:_ScheduleEffect(id)
 end
 
 function NikkiEffect:Remove(id, force_all)
-    local resolver = GetResolver(self)
-    if not resolver or not self._active_effects[id] then return end
 
     local active = self._active_effects[id]
 
@@ -467,7 +455,7 @@ function NikkiEffect:Remove(id, force_all)
 end
 
 function NikkiEffect:IsPermanent(id)
-    local resolver = GetResolver(self)
+    local resolver = self._resolver
     if not resolver then return false end
     local duration, _, _ = resolver:GetEffectConfig(id)
     return duration == nil
