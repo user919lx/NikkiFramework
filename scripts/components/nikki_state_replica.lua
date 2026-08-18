@@ -1,4 +1,3 @@
--- scripts/components/nikki_state_replica.lua
 local log = require("utils/log")
 
 local function GetStateResolver()
@@ -9,6 +8,7 @@ local function GetStateResolver()
 end
 
 local DEFAULT_STATE = "default"
+
 local NikkiStateReplica = Class(function(self, inst)
     self.inst = inst
     self._state = net_string(inst.GUID, "nikki_state._state", "nikki_statedirty")
@@ -37,22 +37,12 @@ function NikkiStateReplica:GetBadges()
     return nil
 end
 
--- 【新增接口】：供外部查询当前形态拥有的全部技能 ID 列表
 function NikkiStateReplica:GetSkills()
     local resolver = GetStateResolver()
     if resolver then
         return resolver:GetSkills(self:GetState())
     end
     return {}
-end
-
--- 供外部（Trigger）查询当前形态的按键绑定
-function NikkiStateReplica:GetSkillsForKey(key_code)
-    local resolver = GetStateResolver()
-    if resolver then
-        return resolver:GetSkillsForKey(self:GetState(), key_code)
-    end
-    return nil
 end
 
 return NikkiStateReplica

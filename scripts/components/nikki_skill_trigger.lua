@@ -1,6 +1,13 @@
 -- scripts/components/nikki_skill_trigger.lua
 local log = require("utils/log")
 
+local function GetStateResolver()
+    if NikkiManager then
+        return NikkiManager:GetStateResolver()
+    end
+    return nil
+end
+
 local NikkiSkillTrigger = Class(function(self, inst)
     self.inst = inst
 
@@ -9,6 +16,20 @@ local NikkiSkillTrigger = Class(function(self, inst)
         actions = {},
         events = {},
     }
+
+    -- 监听状态变化，刷新 keys
+    self.inst:ListenForEvent("nikki_state_dirty", function(inst, data)
+        self:_RefreshKeys(data and data.state) -- 传入新状态
+    end)
+
+    -- 延迟执行初始刷新，传入 basic 状态
+    self.inst:DoTaskInTime(0, function()
+        local resolver = GetStateResolver()
+        if resolver then
+            local basic_state = resolver:GetBasicState()
+            self:_RefreshKeys(basic_state)
+        end
+    end)
 end)
 
 -- ============================================================
@@ -32,6 +53,8 @@ function NikkiSkillTrigger:Add(trigger_type, trigger_key, skill_id)
 
     if trigger_type == "keys" then
         self.triggers.keys[trigger_key] = skill_id
+        log.debug("[NikkiSkillTrigger] Added key trigger: key_code=%s, skill_id=%s", tostring(trigger_key),
+            tostring(skill_id))
     else
         if not self.triggers[trigger_type][trigger_key] then
             self.triggers[trigger_type][trigger_key] = {}
@@ -58,6 +81,7 @@ function NikkiSkillTrigger:Remove(trigger_type, trigger_key, skill_id)
 
     if trigger_type == "keys" then
         self.triggers.keys[trigger_key] = nil
+        log.debug("[NikkiSkillTrigger] Removed key trigger: key_code=%s", tostring(trigger_key))
         return true
     end
 
@@ -87,6 +111,44 @@ end
 -- ============================================================
 function NikkiSkillTrigger:Clear()
     self.triggers = { keys = {}, actions = {}, events = {} }
+end
+
+-- ============================================================
+-- 刷新 keys 绑定（支持 state 覆盖，但内部有 fallback）
+-- ============================================================
+function NikkiSkillTrigger:_RefreshKeys(state_override)
+    local resolver = GetStateResolver()
+    if not resolver then
+        return
+    end
+
+    local state_name = state_override
+
+    -- 若未传入，则从组件获取当前状态
+    if not state_name then
+        local state_comp = self.inst.components.nikki_state
+        if state_comp then
+            state_name = state_comp:GetState()
+        end
+    end
+    if not state_name then
+        log.debug("[NikkiSkillTrigger] No state available to refresh keys.")
+        return
+    end
+
+    local state_def = resolver:GetStateDef(state_name)
+    if not state_def then
+        log.debug("[NikkiSkillTrigger] State definition not found for '%s'", state_name)
+        return
+    end
+
+    if state_def.keys then
+        for key_code, skill_id in pairs(state_def.keys) do
+            self:Add("keys", key_code, skill_id)
+        end
+    end
+
+    log.debug("[NikkiSkillTrigger] Refreshed keys for state '%s' (override=%s)", state_name, tostring(state_override))
 end
 
 -- ============================================================
