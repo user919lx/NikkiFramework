@@ -19,7 +19,9 @@ local NikkiSkillTrigger = Class(function(self, inst)
 
     -- 监听状态变化，刷新 keys
     self.inst:ListenForEvent("nikki_state_dirty", function(inst, data)
-        self:_RefreshKeys(data and data.state) -- 传入新状态
+        local state = data and data.state
+        local old_state = data and data.old_state
+        self:_RefreshKeys(state, old_state)
     end)
 
     -- 延迟执行初始刷新，传入 basic 状态
@@ -27,7 +29,7 @@ local NikkiSkillTrigger = Class(function(self, inst)
         local resolver = GetStateResolver()
         if resolver then
             local basic_state = resolver:GetBasicState()
-            self:_RefreshKeys(basic_state)
+            self:_RefreshKeys(basic_state, nil)
         end
     end)
 end)
@@ -116,29 +118,39 @@ end
 -- ============================================================
 -- 刷新 keys 绑定（支持 state 覆盖，但内部有 fallback）
 -- ============================================================
-function NikkiSkillTrigger:_RefreshKeys(state_override)
+function NikkiSkillTrigger:_RefreshKeys(current_state, old_state)
     local resolver = GetStateResolver()
     if not resolver then
         return
     end
 
-    local state_name = state_override
-
-    -- 若未传入，则从组件获取当前状态
-    if not state_name then
+    -- 若未传入当前状态，则从组件获取
+    if not current_state then
         local state_comp = self.inst.components.nikki_state
         if state_comp then
-            state_name = state_comp:GetState()
+            current_state = state_comp:GetState()
         end
     end
-    if not state_name then
+    if not current_state then
         log.debug("[NikkiSkillTrigger] No state available to refresh keys.")
         return
     end
 
-    local state_def = resolver:GetStateDef(state_name)
+    -- 处理旧状态：移除旧状态的按键绑定
+    if old_state then
+        local old_def = resolver:GetStateDef(old_state)
+        if old_def and old_def.keys then
+            for key_code, skill_id in pairs(old_def.keys) do
+                self:Remove("keys", key_code, skill_id)
+            end
+            log.debug("[NikkiSkillTrigger] Removed keys for old state '%s'", old_state)
+        end
+    end
+
+    -- 处理新状态：添加新状态的按键绑定
+    local state_def = resolver:GetStateDef(current_state)
     if not state_def then
-        log.debug("[NikkiSkillTrigger] State definition not found for '%s'", state_name)
+        log.debug("[NikkiSkillTrigger] State definition not found for '%s'", current_state)
         return
     end
 
@@ -148,7 +160,7 @@ function NikkiSkillTrigger:_RefreshKeys(state_override)
         end
     end
 
-    log.debug("[NikkiSkillTrigger] Refreshed keys for state '%s' (override=%s)", state_name, tostring(state_override))
+    log.debug("[NikkiSkillTrigger] Refreshed keys for state '%s' (old_state=%s)", current_state, tostring(old_state))
 end
 
 -- ============================================================

@@ -20,7 +20,9 @@ local NikkiSkillTrigger = Class(function(self, inst)
     self._aiming_params = nil
 
     self.inst:ListenForEvent("nikki_state_dirty", function(inst, data)
-        self:_RefreshKeys(data and data.state)
+        local state = data and data.state
+        local old_state = data and data.old_state
+        self:_RefreshKeys(state, old_state)
     end)
 
     -- 延迟执行初始刷新，传入 basic 状态
@@ -28,48 +30,58 @@ local NikkiSkillTrigger = Class(function(self, inst)
         local resolver = GetStateResolver()
         if resolver then
             local basic_state = resolver:GetBasicState()
-            self:_RefreshKeys(basic_state)
+            self:_RefreshKeys(basic_state, nil)
         end
     end)
 end)
 
--- ============================================================
--- 刷新 keys 绑定（支持 state 覆盖，但内部有 fallback）
--- ============================================================
-function NikkiSkillTrigger:_RefreshKeys(state_override)
+function NikkiSkillTrigger:AddKey(key_code, skill_id)
+    self._keys[key_code] = skill_id
+end
+
+function NikkiSkillTrigger:RemoveKey(key_code)
+    self._keys[key_code] = nil
+end
+
+function NikkiSkillTrigger:_RefreshKeys(current_state, old_state)
     local resolver = GetStateResolver()
     if not resolver then
         return
     end
 
-    local state_name = state_override
-
-    -- 若未传入，则从组件获取当前状态
-    if not state_name then
+    if not current_state then
         local state_comp = self.inst.components.nikki_state
         if state_comp then
-            state_name = state_comp:GetState()
+            current_state = state_comp:GetState()
         end
     end
-
-    if not state_name then
+    if not current_state then
         log.debug("[NikkiSkillTrigger Replica] No state available to refresh keys.")
         return
     end
 
-    local state_def = resolver:GetStateDef(state_name)
-    if not state_def then
-        log.debug("[NikkiSkillTrigger Replica] State definition not found for '%s'", state_name)
-        return
-    end
-
-    if state_def.keys and next(state_def.keys) then
-        for key_code, skill_id in pairs(state_def.keys) do
-            self._keys[key_code] = skill_id
+    if old_state then
+        local old_def = resolver:GetStateDef(old_state)
+        if old_def and old_def.keys then
+            for key_code, _ in pairs(old_def.keys) do
+                self:RemoveKey(key_code)
+            end
+            log.debug("[NikkiSkillTrigger Replica] Removed keys for old state '%s'", old_state)
         end
     end
 
-    log.debug("[NikkiSkillTrigger Replica] Refreshed keys for state '%s' (override=%s)", state_name, tostring(state_override))
+    local state_def = resolver:GetStateDef(current_state)
+    if not state_def then
+        log.debug("[NikkiSkillTrigger Replica] State definition not found for '%s'", current_state)
+        return
+    end
+    if state_def.keys and next(state_def.keys) then
+        for key_code, skill_id in pairs(state_def.keys) do
+            self:AddKey(key_code, skill_id)
+        end
+    end
+
+    log.debug("[NikkiSkillTrigger Replica] Refreshed keys for state '%s' (old_state=%s)", current_state, tostring(old_state))
 end
 
 -- ============================================================
