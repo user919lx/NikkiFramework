@@ -12,22 +12,29 @@ local DEFAULT_STATE = "default"
 local NikkiStateReplica = Class(function(self, inst)
     self.inst = inst
     self._state = net_string(inst.GUID, "nikki_state._state", "nikki_statedirty")
+    self._old_state = net_string(inst.GUID, "nikki_state._old_state")
     self._state:set(DEFAULT_STATE)
+    self._old_state:set(DEFAULT_STATE)
 
     if not TheWorld.ismastersim then
         inst:ListenForEvent("nikki_statedirty", function()
-            inst:PushEvent("nikki_state_dirty", { state = self:GetState() })
+            inst:PushEvent("nikki_state_dirty", {
+                state = self:GetState(),
+                old_state = self._old_state:value()
+            })
         end)
     end
 end)
 
-function NikkiStateReplica:SetState(state)
+function NikkiStateReplica:SetState(state, old_state)
     self._state:set(state or DEFAULT_STATE)
+    self._old_state:set(old_state or DEFAULT_STATE)
 end
 
 function NikkiStateReplica:GetState()
     return self._state:value() or DEFAULT_STATE
 end
+
 
 function NikkiStateReplica:GetBadges()
     local resolver = GetStateResolver()

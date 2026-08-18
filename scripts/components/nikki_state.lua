@@ -8,10 +8,11 @@ local function GetResolver(self)
 end
 
 local function on_state(self, state)
+    local old_state = self._last_state
     if self.inst.replica.nikki_state then
-        self.inst.replica.nikki_state:SetState(state)
+        self.inst.replica.nikki_state:SetState(state, old_state)
     end
-    self.inst:PushEvent("nikki_state_dirty", { state = state })
+    self.inst:PushEvent("nikki_state_dirty", { state = state, old_state = old_state })
 end
 
 local NikkiState = Class(function(self, inst)
@@ -58,7 +59,9 @@ function NikkiState:SetState(state, force)
     end
 
     if self.state == state and not force then return end
+    self._last_state = self.state
     self.state = state
+
     log.debug("[NikkiState] %s state changed to %s", tostring(self.inst), state)
     self:RefreshOverlay()
 end
