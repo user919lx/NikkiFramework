@@ -1,13 +1,6 @@
 -- scripts/components/nikki_skillwheel_replica.lua
 local log = require("utils/log")
 
-local function GetSkillResolver()
-    if NikkiManager then
-        return NikkiManager:GetSkillResolver()
-    end
-    return nil
-end
-
 local NikkiSkillWheel = Class(function(self, inst)
     self.inst = inst
 end)
@@ -17,7 +10,7 @@ end)
 -- ==========================================================
 function NikkiSkillWheel:GetWheelItems()
     local user = self.inst
-    local resolver = GetSkillResolver()
+    local resolver = self._resolver
     if not resolver then return {} end
 
     local items = {}

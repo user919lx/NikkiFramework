@@ -621,8 +621,19 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
         inst:DoTaskInTime(0, function()
             if not TheNet:IsDedicated() and inst == ThePlayer then
                 local indicator = SpawnPrefab("nikki_range_indicator")
-                indicator:Attach(inst)
+                indicator:SetOwner(inst, self:GetSetting("show_range"))
                 inst.components.playeractionpicker.leftclickoverride = LeftClickOverride
+                if inst.replica then
+                    if inst.replica.nikki_state then
+                        inst.replica.nikki_state._resolver = self.state_resolver
+                    end
+                    if inst.replica.nikki_skill_trigger then
+                        inst.replica.nikki_skill_trigger._resolver = self.state_resolver
+                    end
+                    if inst.replica.nikki_skillwheel then
+                        inst.replica.nikki_skillwheel._resolver = self.skill_resolver
+                    end
+                end
             end
         end)
     end

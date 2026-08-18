@@ -1,12 +1,5 @@
 local log = require("utils/log")
 
-local function GetStateResolver()
-    if NikkiManager then
-        return NikkiManager:GetStateResolver()
-    end
-    return nil
-end
-
 local DEFAULT_STATE = "default"
 
 local NikkiStateReplica = Class(function(self, inst)
@@ -37,7 +30,7 @@ end
 
 
 function NikkiStateReplica:GetBadges()
-    local resolver = GetStateResolver()
+    local resolver = self._resolver
     if resolver then
         return resolver:GetBadges(self:GetState())
     end
@@ -45,7 +38,7 @@ function NikkiStateReplica:GetBadges()
 end
 
 function NikkiStateReplica:GetSkills()
-    local resolver = GetStateResolver()
+    local resolver = self._resolver
     if resolver then
         return resolver:GetSkills(self:GetState())
     end

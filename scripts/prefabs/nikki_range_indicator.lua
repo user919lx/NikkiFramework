@@ -23,7 +23,6 @@ local function ApplyScale(inst)
     end
 end
 
--- 统一处理显隐逻辑：只有 (开关开启) 且 (射程 > 0) 时才显示
 local function UpdateVisibility(inst)
     if inst._is_toggled_on and inst._range > 0 then
         inst:Show()
@@ -35,20 +34,18 @@ end
 local function SetRange(inst, range)
     local value = tonumber(range) or 0
     inst._range = value
-
     if value > 0 then
         ApplyScale(inst)
     end
-
     UpdateVisibility(inst)
 end
 
-local function Attach(inst, owner)
+function SetOwner(inst, owner, initial_show_range)
     if owner and owner.entity then
         inst.owner = owner
         inst.entity:SetParent(owner.entity)
 
-        inst._is_toggled_on = NikkiManager:GetSetting("show_range")
+        inst._is_toggled_on = initial_show_range
 
         inst:ListenForEvent("skill_range_toggle_changed", function(owner_inst, data)
             if data ~= nil and data.new_state ~= nil then
@@ -70,13 +67,10 @@ local function Attach(inst, owner)
     end
 end
 
-
 local function fn()
     local inst = CreateEntity()
-
     inst.entity:AddTransform()
     inst.entity:AddAnimState()
-
     inst.entity:SetCanSleep(false)
     inst.persists = false
 
@@ -98,10 +92,10 @@ local function fn()
 
     inst.owner = nil
     inst._range = 0
-    inst._is_toggled_on = false 
+    inst._is_toggled_on = false
 
     inst.SetRange = SetRange
-    inst.Attach = Attach
+    inst.SetOwner = SetOwner
 
     return inst
 end
