@@ -74,23 +74,10 @@ function NikkiManager:RegisterMod(config, mod_env)
 
     self:_RegisterExtensions(config, mod_env)
     self:_LoadDefs(config)
-
-    -- 提取 basic 和 default
-    local basic_state = "basic"
-    local default_state = "default"
-
-    if config.defs and config.defs.state and type(config.defs.state) == "table" then
-        if config.defs.state.basic then
-            basic_state = config.defs.state.basic
-        end
-        if config.defs.state.default then
-            default_state = config.defs.state.default
-        end
-    end
-
-    self:_ApplyTo(config, mod_env, basic_state, default_state)
-
-    log.info("[NikkiManager] Mod registered.")
+    -- 加载传统框架资源（配方、动作、SG、图集）—— 路径位于 defs 下
+    self:_LoadFrameworkResources(config, mod_env)
+    self:_ApplyTo(config, mod_env)
+    log.info("[NikkiManager] Mod %s registered.", tostring(mod_env.modname))
 end
 
 -- ============================================================
@@ -112,9 +99,7 @@ function NikkiManager:_InstallTriggerHooks(env)
         return
     end
 
-    -- ============================================================
     -- Action 劫持：拦截 BufferedAction:Do
-    -- ============================================================
     local _old_Do = BufferedAction.Do
     BufferedAction.Do = function(self)
         local origin_result, origin_reason = _old_Do(self)
@@ -135,9 +120,7 @@ function NikkiManager:_InstallTriggerHooks(env)
         return origin_result, origin_reason
     end
 
-    -- ============================================================
-    -- Event 劫持：拦截 EntityScript:PushEvent / PushEventImmediate
-    -- ============================================================
+    -- Event 劫持：拦截 PushEvent / PushEventImmediate
     local event_depth = 0
     local MAX_EVENT_DEPTH = 8
 
@@ -150,7 +133,6 @@ function NikkiManager:_InstallTriggerHooks(env)
                     MAX_EVENT_DEPTH, tostring(event))
                 return result
             end
-
             event_depth = event_depth + 1
             xpcall(function()
                 self.components.nikki_skill_trigger:Trigger("events", event, data)
@@ -175,8 +157,7 @@ function NikkiManager:_InstallTriggerHooks(env)
             xpcall(function()
                 self.components.nikki_skill_trigger:Trigger("events", event, data)
             end, function(err)
-                log.error("[NikkiManager] Error in Trigger for immediate event '%s': %s", tostring(event),
-                    tostring(err))
+                log.error("[NikkiManager] Error in Trigger for immediate event '%s': %s", tostring(event), tostring(err))
             end)
             event_depth = event_depth - 1
         end
@@ -270,7 +251,7 @@ function NikkiManager:_LoadDefs(config)
         end
     end
 
-    -- 3. 加载 State（直接 require 并 AddDefs）
+    -- 3. 加载 State
     if defs.state then
         local state_cfg = defs.state
         local state_file = type(state_cfg) == "table" and state_cfg.file or
@@ -282,6 +263,181 @@ function NikkiManager:_LoadDefs(config)
                 log.debug("[NikkiManager] Loaded states from '%s'.", state_file)
             end
         end
+        -- 提取 basic 和 default 并保存到 resolver
+        if type(state_cfg) == "table" then
+            if state_cfg.basic then
+                self.state_resolver:SetBasicState(state_cfg.basic)
+            end
+            if state_cfg.default then
+                self.state_resolver:SetDefaultState(state_cfg.default)
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- 新增：加载 Framework 资源（食谱、动作、SG、图集）
+-- 路径均位于 config.defs 下
+-- ============================================================
+function NikkiManager:_LoadFrameworkResources(config, mod_env)
+    local defs = config.defs
+    if not defs or type(defs) ~= "table" then
+        return
+    end
+
+    -- 获取 Mod API（优先 mod_env，否则全局）
+    local function getAPI(name)
+        return mod_env[name] or _G[name]
+    end
+
+    local AddRecipe2 = getAPI("AddRecipe2")
+    local AddDeconstructRecipe = getAPI("AddDeconstructRecipe")
+    local AddIngredientValues = getAPI("AddIngredientValues")
+    local AddCookerRecipe = getAPI("AddCookerRecipe")
+    local AddAction = getAPI("AddAction")
+    local AddStategraphActionHandler = getAPI("AddStategraphActionHandler")
+    local AddComponentAction = getAPI("AddComponentAction")
+    local AddStategraphState = getAPI("AddStategraphState")
+    local AddStategraphEvent = getAPI("AddStategraphEvent")
+    local RegisterInventoryItemAtlas = getAPI("RegisterInventoryItemAtlas")
+    local ActionHandler = getAPI("ActionHandler") or ActionHandler
+    local EventHandler = getAPI("EventHandler") or EventHandler
+
+    -- 辅助加载函数
+    local function loadFile(path, callback)
+        if not path then return end
+        local ok, data = pcall(require, path)
+        if ok then
+            callback(data)
+            log.info("[NikkiManager] Loaded framework resource: %s", path)
+        else
+            log.error("[NikkiManager] Failed to load framework resource '%s': %s", path, tostring(data))
+        end
+    end
+
+    -- 1. 处理配方（recipes）
+    if defs.recipes then
+        loadFile(defs.recipes, function(recipes_data)
+            -- 制作配方
+            if recipes_data.Recipes then
+                for _, data in pairs(recipes_data.Recipes) do
+                    local config = {
+                        placer = data.placer,
+                        min_spacing = data.min_spacing,
+                        nounlock = data.nounlock,
+                        numtogive = data.numtogive,
+                        builder_tag = data.builder_tag,
+                        atlas = data.atlas,
+                        image = data.image,
+                        testfn = data.testfn,
+                        product = data.product,
+                        build_mode = data.build_mode,
+                    }
+                    local tech_required = data.level or TECH.NONE
+                    local filters = data.filters or {}
+                    if data.tab and #filters == 0 then
+                        table.insert(filters, data.tab)
+                    end
+                    if #filters == 0 then
+                        table.insert(filters, "MODS")
+                    end
+                    AddRecipe2(data.name, data.ingredients, tech_required, config, filters)
+                end
+            end
+
+            -- 分解配方
+            if recipes_data.DeconstructRecipes then
+                for _, data in pairs(recipes_data.DeconstructRecipes) do
+                    AddDeconstructRecipe(data.name, data.return_ingredients)
+                end
+            end
+
+            -- 食物值
+            if recipes_data.IngredientValues then
+                for _, data in pairs(recipes_data.IngredientValues) do
+                    AddIngredientValues(data.names, data.tags, data.cancook, data.candry)
+                end
+            end
+
+            -- 烹饪配方
+            if recipes_data.CookerRecipes then
+                for cooker, recipes in pairs(recipes_data.CookerRecipes) do
+                    for _, recipe in ipairs(recipes) do
+                        AddCookerRecipe(cooker, recipe)
+                    end
+                end
+            end
+        end)
+    end
+
+    -- 2. 处理动作（actions）
+    if defs.actions then
+        loadFile(defs.actions, function(actions_data)
+            if actions_data.actions then
+                for _, action_data in pairs(actions_data.actions) do
+                    local action = AddAction(action_data.id, action_data.str, action_data.fn)
+                    if action_data.actiondata then
+                        for k, data in pairs(action_data.actiondata) do
+                            action[k] = data
+                        end
+                    end
+                    if action_data.state then
+                        AddStategraphActionHandler("wilson", ActionHandler(action, action_data.state))
+                        AddStategraphActionHandler("wilson_client", ActionHandler(action, action_data.state))
+                    end
+                end
+            end
+
+            if actions_data.component_actions then
+                for _, v in pairs(actions_data.component_actions) do
+                    local parm_idx = v.type == "POINT" and -3 or -2
+                    local testfn = function(...)
+                        local actions = select(parm_idx, ...)
+                        for _, data in pairs(v.tests) do
+                            if data and data.testfn and data.testfn(...) then
+                                data.action = string.upper(data.action)
+                                table.insert(actions, ACTIONS[data.action])
+                            end
+                        end
+                    end
+                    AddComponentAction(v.type, v.component, testfn)
+                end
+            end
+        end)
+    end
+
+    -- 3. 处理 SG（状态图）
+    if defs.sg then
+        loadFile(defs.sg, function(sg_data)
+            if sg_data.sgs then
+                for sg, sg_states in pairs(sg_data.sgs) do
+                    for _, state in pairs(sg_states) do
+                        AddStategraphState(sg, state)
+                    end
+                end
+            end
+            if sg_data.events then
+                for sg, event_data in pairs(sg_data.events) do
+                    for event, fn in pairs(event_data) do
+                        AddStategraphEvent(sg, EventHandler(event, fn))
+                    end
+                end
+            end
+        end)
+    end
+
+    -- 4. 处理图集注册（images）
+    if defs.images then
+        loadFile(defs.images, function(images_data)
+            for _, atlas_data in ipairs(images_data) do
+                local atlas = resolvefilepath(atlas_data.atlas)
+                if atlas_data.images then
+                    for _, image_name in ipairs(atlas_data.images) do
+                        RegisterInventoryItemAtlas(atlas, string.format("%s.tex", image_name))
+                    end
+                end
+            end
+        end)
     end
 end
 
@@ -412,16 +568,15 @@ end
 -- ============================================================
 -- 装配分发
 -- ============================================================
-function NikkiManager:_ApplyTo(config, mod_env, basic_state, default_state)
+function NikkiManager:_ApplyTo(config, mod_env)
     local apply_to = config.apply_to or {}
     local custom_resources = config.custom_resources
-
     for tier_name, tier_cfg in pairs(apply_to) do
         if type(tier_cfg) == "table" then
             if type(tier_cfg.prefabs) == "table" then
                 for _, prefab in ipairs(tier_cfg.prefabs) do
                     mod_env.AddPrefabPostInit(prefab, function(inst)
-                        self:ApplyFrameworkToInst(inst, tier_name, custom_resources, basic_state, default_state)
+                        self:ApplyFrameworkToInst(inst, tier_name, custom_resources)
                     end)
                 end
             end
@@ -429,7 +584,7 @@ function NikkiManager:_ApplyTo(config, mod_env, basic_state, default_state)
                 local tag_name = tier_cfg.tag
                 mod_env.AddPrefabPostInitAny(function(inst)
                     if inst.HasTag and inst:HasTag(tag_name) then
-                        self:ApplyFrameworkToInst(inst, tier_name, custom_resources, basic_state, default_state)
+                        self:ApplyFrameworkToInst(inst, tier_name, custom_resources)
                     end
                 end)
             end
@@ -437,17 +592,29 @@ function NikkiManager:_ApplyTo(config, mod_env, basic_state, default_state)
     end
 end
 
-function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources, basic_state, default_state)
+function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
     local TIER_LEVELS = { skill = 2, player = 3 }
     local tier_level = TIER_LEVELS[tier_name] or 0
 
     inst:AddTag("nikki_framework")
 
     if tier_level >= 3 then
+        -- HUD 处理
         inst:DoTaskInTime(0, function()
             if not TheNet:IsDedicated() and inst == ThePlayer then
                 local indicator = SpawnPrefab("nikki_range_indicator")
                 indicator:Attach(inst)
+                inst.components.playeractionpicker.leftclickoverride = function(inst, target, position)
+                    local actions = {}
+                    if inst:HasTag("aiming_point") then
+                        table.insert(actions, ACTIONS.TARGETING)
+                        target = position
+                    end
+                    if #actions > 0 then
+                        return inst.components.playeractionpicker:SortActionList(actions, target)
+                    end
+                    return {}, true
+                end
             end
         end)
     end
@@ -472,7 +639,10 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources, ba
     if not inst.components.nikki_skill_trigger then inst:AddComponent("nikki_skill_trigger") end
     if not inst.components.nikki_state then inst:AddComponent("nikki_state") end
 
-    -- 应用 basic 状态
+    -- 从 resolver 获取 basic/default
+    local basic_state = self.state_resolver:GetBasicState()
+    local default_state = self.state_resolver:GetDefaultState()
+
     if inst.components.nikki_state and basic_state then
         inst.components.nikki_state:ApplyBasic(basic_state)
     end
