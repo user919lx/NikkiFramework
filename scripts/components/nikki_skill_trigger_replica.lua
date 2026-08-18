@@ -84,9 +84,6 @@ function NikkiSkillTrigger:_RefreshKeys(current_state, old_state)
     log.debug("[NikkiSkillTrigger Replica] Refreshed keys for state '%s' (old_state=%s)", current_state, tostring(old_state))
 end
 
--- ============================================================
--- 客户端：根据按键获取技能 ID
--- ============================================================
 function NikkiSkillTrigger:GetSkillsForKey(key_code)
     return self._keys[key_code]
 end
@@ -122,16 +119,19 @@ end
 function NikkiSkillTrigger:CastKey(key)
     local skill_id = self:GetSkillsForKey(key)
     if not skill_id then
+        log.warn("[NikkiSkillTrigger Replica] No skill bound to key '%s'", key)
         return false
     end
 
     local resolver = NikkiManager:GetSkillResolver()
     if not resolver then
+        log.error("[NikkiSkillTrigger Replica] Skill resolver not available.")
         return false
     end
 
     local def = resolver:GetDef(skill_id)
     if not def then
+        log.debug("[NikkiSkillTrigger Replica] Skill definition not found for skill_id '%s'", skill_id)
         return false
     end
 
@@ -139,9 +139,11 @@ function NikkiSkillTrigger:CastKey(key)
     if def.targeting and def.targeting.mode == "point" then
         self:EnterAiming(skill_id)
         self.inst:PushEvent("nikki_aiming_start", { skill_id = skill_id })
+        log.debug("[NikkiSkillTrigger Replica] Skill '%s' requires aiming. Entering aiming mode.", skill_id)
         return true
     end
 
+    log.debug("[NikkiSkillTrigger Replica] Casting skill '%s' for key '%s'", skill_id, key)
     -- 瞬发：发送 RPC 到服务端
     SendModRPCToServer(GetModRPC("NikkiFramework", "CastKey"), key)
     return true

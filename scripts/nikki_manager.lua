@@ -101,6 +101,7 @@ function NikkiManager:_InstallTriggerHooks(env)
 
     -- Action 劫持：拦截 BufferedAction:Do
     local _old_Do = BufferedAction.Do
+    ---@diagnostic disable-next-line: duplicate-set-field
     BufferedAction.Do = function(self)
         local origin_result, origin_reason = _old_Do(self)
         if self.doer and self.doer:IsValid() and self.action and self.action.id then

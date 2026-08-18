@@ -190,8 +190,10 @@ function NikkiSkillTrigger:Trigger(trigger_type, trigger_key, params)
     if trigger_type == "keys" then
         local skill_id = self.triggers.keys[trigger_key]
         if not skill_id then
+            log.debug("[NikkiSkillTrigger] Trigger(keys): No skill bound to key '%s'", tostring(trigger_key))
             return false
         end
+        log.debug("[NikkiSkillTrigger] Trigger(keys): Executing skill '%s' for key '%s'", skill_id, tostring(trigger_key))
         return skill_comp:Execute(skill_id, params)
     end
 
