@@ -3,7 +3,7 @@ local log = require("utils/log")
 
 local NikkiSkillTrigger = Class(function(self, inst)
     self.inst = inst
-    self._resolver = nil  -- 由 Manager 注入
+    self._resolver = nil -- 由 Manager 注入
 
     self.triggers = {
         keys = {},
@@ -171,26 +171,24 @@ function NikkiSkillTrigger:Trigger(trigger_type, trigger_key, params)
     if not skill_comp then
         return false
     end
-
+    -- ============================================================
+    -- 主动触发：走 TryExecute（需要路由 + 封装）
+    -- ============================================================
     if trigger_type == "cast" then
-        if not trigger_key or type(trigger_key) ~= "string" then
-            log.warn("[NikkiSkillTrigger] Trigger(cast): skill_id must be non-empty string, got %s",
-                tostring(trigger_key))
-            return false
-        end
-        return skill_comp:Execute(trigger_key, params)
+        return skill_comp:TryExecute(trigger_key, params)
     end
 
     if trigger_type == "keys" then
         local skill_id = self.triggers.keys[trigger_key]
         if not skill_id then
-            log.debug("[NikkiSkillTrigger] Trigger(keys): No skill bound to key '%s'", tostring(trigger_key))
-            return false
+            return false, "NO_BINDING"
         end
-        log.debug("[NikkiSkillTrigger] Trigger(keys): Executing skill '%s' for key '%s'", skill_id, tostring(trigger_key))
-        return skill_comp:Execute(skill_id, params)
+        return skill_comp:TryExecute(skill_id, params)
     end
 
+    -- ============================================================
+    -- 被动触发：直接走 Execute（上下文已完整，不需要封装）
+    -- ============================================================
     local skill_set = self.triggers[trigger_type] and self.triggers[trigger_type][trigger_key]
     if not skill_set or next(skill_set) == nil then
         return false
@@ -207,7 +205,6 @@ function NikkiSkillTrigger:Trigger(trigger_type, trigger_key, params)
             last_error = err or "EXECUTION_FAILED"
         end
     end
-
     return any_success, last_error
 end
 

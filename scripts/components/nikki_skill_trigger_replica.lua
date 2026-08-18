@@ -141,7 +141,6 @@ end
 function NikkiSkillTrigger:CastKey(key)
     local skill_id = self:GetSkillsForKey(key)
     if not skill_id then
-        log.warn("[NikkiSkillTrigger Replica] No skill bound to key '%s'", key)
         return false
     end
 
@@ -164,20 +163,10 @@ function NikkiSkillTrigger:CastKey(key)
         end
     end
 
-    log.debug("[NikkiSkillTrigger Replica] Casting skill '%s' for key '%s'", skill_id, key)
+    log.debug("[NikkiSkillTrigger Replica] Try casting skill '%s' for key '%s'", skill_id, key)
     SendModRPCToServer(GetModRPC("NikkiFramework", "CastKey"), key)
     return true
 end
 
--- ============================================================
--- 取消瞄准
--- ============================================================
-function NikkiSkillTrigger:CancelAiming()
-    if not self._aiming then
-        return
-    end
-    self:ExitAiming()
-    self.inst:PushEvent("nikki_aiming_cancel")
-end
 
 return NikkiSkillTrigger

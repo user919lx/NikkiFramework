@@ -209,9 +209,74 @@ function NikkiSkill:StartCooldown(skill_id, cd_time)
 end
 
 -- ============================================================
--- 核心执行入口
+-- 执行入口
 -- ============================================================
 
+-- 主动执行 （封装BufferAction）
+function NikkiSkill:TryExecute(skill_id, params)
+    local resolver = self._resolver
+    if not resolver then
+        return false, "RESOLVER_NOT_FOUND"
+    end
+    local def = resolver:GetDef(skill_id)
+    if not def then
+        return false, "SKILL_DEF_NOT_FOUND"
+    end
+    -- 无 action 块 → 直接执行（走 Execute）
+    local action_def = def.action
+    if not action_def then
+        return self:Execute(skill_id, params)
+    end
+    -- 有 action 块 → 走 BufferedAction 封装
+    local invoke = action_def.invoke or "instant"
+    local target = params.target
+    local pos = params.pos
+
+    -- 4. 根据 invoke 补全参数（fallback）
+    if invoke == "target" then
+        if not target and action_def.fallback and action_def.fallback.target then
+            target = action_def.fallback.target(self.inst, params, def)
+        end
+        if not target or not target:IsValid() then
+            return false, "MISSING_OR_INVALID_TARGET"
+        end
+    elseif invoke == "pos" then
+        if not pos and action_def.fallback and action_def.fallback.pos then
+            pos = action_def.fallback.pos(self.inst, params, def)
+        end
+        if not pos then
+            return false, "MISSING_POS"
+        end
+    end
+    -- invoke == "instant" 不需要补全任何参数
+
+    -- 5. 构造 BufferedAction
+    local act = BufferedAction(
+        self.inst,           -- doer
+        target,              -- target（invoke="target" 时有值）
+        ACTIONS.NIKKI_SKILL, -- action（需提前注册）
+        nil,                 -- invobject
+        pos,                 -- pos（invoke="pos" 时有值）
+        nil,                 -- recipe
+        def.range or 0       -- distance（用 def.range 控制）
+    )
+
+    -- 挂载元数据（供 ACTIONS.NIKKI_SKILL.fn 回调）
+    act._skill_id = skill_id
+    act._skill_state = action_def.state or "doshortaction"
+    act._display_name = resolver:GetDisplayName(skill_id)
+    act._raw_params = params
+
+    -- 6. 推送到 locomotor
+    local pc = self.inst.components.playercontroller
+    if not pc then
+        return false, "NO_PLAYERCONTROLLER"
+    end
+    pc:DoAction(act)
+    return  true
+end
+
+-- 统一执行入口（直接执行）
 function NikkiSkill:Execute(skill_id, params)
     if not self:IsAdded(skill_id) then
         return false, "NOT_ADDED"
