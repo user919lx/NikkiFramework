@@ -19,22 +19,27 @@ local function GenerateToggleEffectId(skill_id)
     return "_skill_toggle_" .. skill_id
 end
 
-local function LeftClickOverride(inst, target, pos)
-    if inst and inst.replica.nikki_skill_trigger and target and target:IsValid() then
-        local replica_skill = inst.replica.nikki_skill
-        local actions = {}
-        if replica_skill then
-            local act = replica_skill:GetAvailableSkillAction(target, pos, false)
-            if act then
-                table.insert(actions, act)
+local function MakeClickOverride(is_right_click)
+    return function(inst, target, pos)
+        if inst and inst.replica.nikki_skill_trigger and target and target:IsValid() then
+            local replica_skill = inst.replica.nikki_skill
+            local actions = {}
+            if replica_skill then
+                -- 唯一差异：传入 is_right_click 作为最后一个参数
+                local act = replica_skill:GetAvailableSkillAction(target, pos, is_right_click)
+                if act then
+                    table.insert(actions, act)
+                end
+            end
+            if #actions > 0 then
+                return actions
             end
         end
-        if #actions > 0 then
-            return actions
-        end
+        -- 无可用动作时返回空表 + true，保持与原逻辑一致
+        return {}, true
     end
-    return {}, true
 end
+
 
 -- ============================================================
 -- 统一管理器（全局单例）
@@ -626,7 +631,8 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
                     inst.range_indicator = indicator
                 end
                 inst:PushEvent("skill_range_toggle_changed", { new_state = self:GetSetting("show_range") })
-                inst.components.playeractionpicker.leftclickoverride = LeftClickOverride
+                inst.components.playeractionpicker.leftclickoverride = MakeClickOverride(false)
+                inst.components.playeractionpicker.rightclickoverride = MakeClickOverride(true)
                 if inst.replica then
                     if inst.replica.nikki_skill then
                         inst.replica.nikki_skill._resolver = self.skill_resolver
