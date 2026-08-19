@@ -79,9 +79,29 @@ function NikkiSkill:_OnSkillRemove(skill_id)
 end
 
 -- ============================================================
--- 添加技能（含 trigger 绑定和子技能递归）
+-- 技能 添加/移除
 -- ============================================================
-function NikkiSkill:AddSkills(ids)
+function NikkiSkill:_UpdateRangeRadius()
+    local resolver = self._resolver
+    if not resolver then return end
+
+    local max_range = 0
+    for _, skill_id in ipairs(self._active_skills) do
+        local range = resolver:GetSkillRange(skill_id)
+        if range and type(range) == "number" and range > max_range then
+            max_range = range
+        end
+    end
+    if max_range ~= self.max_range then
+        self.max_range = max_range
+    end
+end
+function NikkiSkill:_SyncActiveSkillsToReplica()
+    if self.inst.replica.nikki_skill then
+        self.inst.replica.nikki_skill:SyncActiveSkills()
+    end
+end
+function NikkiSkill:_AddSkillsInternal(ids)
     if not ids then return end
     local resolver = self._resolver
     local trigger_resolver = self._trigger_resolver
@@ -98,8 +118,7 @@ function NikkiSkill:AddSkills(ids)
                         for trigger_type, trigger_keys in pairs(triggers) do
                             for _, trigger_key in ipairs(trigger_keys) do
                                 trigger_comp:Add(trigger_type, trigger_key, id)
-                                log.debug("[NikkiSkill] Added trigger binding: %s[%s] -> %s", trigger_type, trigger_key,
-                                    id)
+                                log.debug("[NikkiSkill] Added trigger binding: %s[%s] -> %s", trigger_type, trigger_key, id)
                             end
                         end
                     end
@@ -107,25 +126,21 @@ function NikkiSkill:AddSkills(ids)
             end
             local def = resolver and resolver:GetDef(id)
             if def and def._sub_skills then
-                self:AddSkills(def._sub_skills)
+                self:_AddSkillsInternal(def._sub_skills)
             end
         end
     end
-    self:_UpdateRangeRadius()
-    self:_SyncActiveSkillsToReplica()
 end
-
--- ============================================================
--- 移除技能（含 trigger 绑定移除和子技能递归）
--- ============================================================
-function NikkiSkill:RemoveSkills(ids)
+function NikkiSkill:_RemoveSkillsInternal(ids)
     if not ids then return end
+
     for _, id in ipairs(ids) do
         if self:IsAdded(id) then
             local resolver = self._resolver
             local def = resolver and resolver:GetDef(id)
+
             if def and def._sub_skills then
-                self:RemoveSkills(def._sub_skills)
+                self:_RemoveSkillsInternal(def._sub_skills)
             end
 
             local trigger_resolver = self._trigger_resolver
@@ -137,8 +152,7 @@ function NikkiSkill:RemoveSkills(ids)
                         for trigger_type, trigger_keys in pairs(triggers) do
                             for _, trigger_key in ipairs(trigger_keys) do
                                 trigger_comp:Remove(trigger_type, trigger_key, id)
-                                log.debug("[NikkiSkill] Removed trigger binding: %s[%s] -> %s", trigger_type, trigger_key,
-                                    id)
+                                log.debug("[NikkiSkill] Removed trigger binding: %s[%s] -> %s", trigger_type, trigger_key, id)
                             end
                         end
                     end
@@ -146,6 +160,7 @@ function NikkiSkill:RemoveSkills(ids)
             end
 
             self:_OnSkillRemove(id)
+
             for i, existing_id in ipairs(self._active_skills) do
                 if existing_id == id then
                     table.remove(self._active_skills, i)
@@ -153,33 +168,21 @@ function NikkiSkill:RemoveSkills(ids)
                     break
                 end
             end
+
             self._cooldowns[id] = nil
         end
     end
+end
+function NikkiSkill:AddSkills(ids)
+    self:_AddSkillsInternal(ids)
     self:_UpdateRangeRadius()
     self:_SyncActiveSkillsToReplica()
 end
 
-function NikkiSkill:_UpdateRangeRadius()
-    local resolver = self._resolver
-    if not resolver then return end
-
-    local max_range = 0
-    for _, skill_id in ipairs(self._active_skills) do
-        local range = resolver:GetSkillRange(skill_id)
-        if range and type(range) == "number" and range > max_range then
-            max_range = range
-        end
-    end
-    if max_range ~= self.max_range then
-        self.max_range = max_range
-    end
-end
-
-function NikkiSkill:_SyncActiveSkillsToReplica()
-    if self.inst.replica.nikki_skill then
-        self.inst.replica.nikki_skill:SyncActiveSkills()
-    end
+function NikkiSkill:RemoveSkills(ids)
+    self:_RemoveSkillsInternal(ids)
+    self:_UpdateRangeRadius()
+    self:_SyncActiveSkillsToReplica()
 end
 
 -- ============================================================
