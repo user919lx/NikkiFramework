@@ -84,10 +84,11 @@ end
 function NikkiSkill:IsActive(skill_id)
     return self._active_skills_cache[skill_id] == true
 end
+
 -- ============================================================
 -- 构造 BufferedAction
 -- ============================================================
-function NikkiSkill:BuildBufferedAction(target, pos, skill_id)
+function NikkiSkill:BuildBufferedAction(target, pos, skill_id, with_cb)
     local def = self:GetSkillDef(skill_id)
     if not def then
         return nil
@@ -96,7 +97,6 @@ function NikkiSkill:BuildBufferedAction(target, pos, skill_id)
     if not action_def then
         return nil
     end
-    -- 创建 BufferedAction
     local act = BufferedAction(
         self.inst,
         target,
@@ -106,12 +106,28 @@ function NikkiSkill:BuildBufferedAction(target, pos, skill_id)
         nil,
         def.range or 0
     )
-
-    -- 挂载元数据
     act._skill_id = skill_id
     act._skill_state = action_def.state or "doshortaction"
     act._display_name = self:GetSkillName(skill_id) or skill_id
-
+    -- 若需要回调，则附加预览/非预览回调
+    if with_cb then
+        pos = pos or {}
+        local x = pos.x or nil
+        local z = pos.z or nil
+        local callback = function()
+            SendModRPCToServer(GetModRPC("NikkiFramework", "TryExecuteSkill"),
+                skill_id,
+                target,
+                x,
+                z
+            )
+        end
+        if self.inst.components.locomotor ~= nil then
+            act.preview_cb = callback
+        else
+            act.non_preview_cb = callback
+        end
+    end
     return act
 end
 
@@ -202,11 +218,10 @@ function NikkiSkill:TryExecute(skill_id, params)
     end
 
     -- 调用封装函数构造 BufferedAction
-    local act = self:BuildBufferedAction(target, pos, skill_id)
+    local act = self:BuildBufferedAction(target, pos, skill_id, true)
     if not act then
         return false, "BUILD_ACTION_FAILED"
     end
-
     -- 执行动作（客户端预览或主控直接执行）
     local pc = self.inst.components.playercontroller
     if not pc then
