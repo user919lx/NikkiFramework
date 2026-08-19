@@ -228,14 +228,19 @@ function SkillResolver:BuildWheelItem(skill_id, user, order)
     return item
 end
 
-function SkillResolver:GetSkillRange(skill_id)
+function SkillResolver:GetRange(skill_id)
     local def = self:GetDef(skill_id)
     return def and def.range or nil
 end
 
-function SkillResolver:GetSkillCooldown(skill_id)
+function SkillResolver:GetCooldown(skill_id)
     local def = self:GetDef(skill_id)
     return def and def.cd or 0
+end
+
+function SkillResolver:GetActionDef(skill_id)
+    local def = self:GetDef(skill_id)
+    return def and def.action or nil
 end
 
 function SkillResolver:NeedsServer(skill_id)

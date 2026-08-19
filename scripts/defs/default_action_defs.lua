@@ -5,8 +5,8 @@ local all_actions = {
         str = "暖暖技能",
         fn = function(act)
             local doer = act.doer
-            if doer == nil or not doer.components.nikki_skill then
-                return false, "NO_SKILL_COMPONENT"
+            if doer == nil or not doer.components.nikki_skill_caster then
+                return false, "NO_SKILL_CASTER_COMPONENT"
             end
             local params = {
                 act = act,
@@ -15,7 +15,7 @@ local all_actions = {
                 doer = act.doer,
                 invobject = act.invobject,
             }
-            return doer.components.nikki_skill:Execute(act._skill_id, params)
+            return doer.components.nikki_skill_caster:Execute(act._skill_id, params)
         end,
         state = function(inst, act)
             local state = "doshortaction"

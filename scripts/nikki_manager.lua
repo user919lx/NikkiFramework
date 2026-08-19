@@ -21,12 +21,12 @@ end
 
 local function MakeClickOverride(is_right_click)
     return function(inst, target, pos)
-        if inst and inst.replica.nikki_skill_trigger and target and target:IsValid() then
-            local replica_skill = inst.replica.nikki_skill
+        if inst and inst.components.nikki_skill_caster and target and target:IsValid() then
+            local cmp_caster = inst.components.nikki_skill_caster
             local actions = {}
-            if replica_skill then
+            if cmp_caster then
                 -- 唯一差异：传入 is_right_click 作为最后一个参数
-                local act = replica_skill:GetAvailableSkillAction(target, pos, is_right_click)
+                local act = cmp_caster:GetAvailableSkillAction(target, pos, is_right_click)
                 if act then
                     table.insert(actions, act)
                 end
@@ -633,6 +633,9 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
                 inst:PushEvent("skill_range_toggle_changed", { new_state = self:GetSetting("show_range") })
                 inst.components.playeractionpicker.leftclickoverride = MakeClickOverride(false)
                 inst.components.playeractionpicker.rightclickoverride = MakeClickOverride(true)
+                if not inst.components.nikki_skill_caster then
+                    inst:AddComponent("nikki_skill_caster")
+                end
                 if inst.replica then
                     if inst.replica.nikki_skill then
                         inst.replica.nikki_skill._resolver = self.skill_resolver
@@ -675,9 +678,13 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
     if not inst.components.nikki_skill_trigger then
         inst:AddComponent("nikki_skill_trigger")
     end
+    if not inst.components.nikki_skill_caster then
+        inst:AddComponent("nikki_skill_caster")
+    end
     if not inst.components.nikki_state then
         inst:AddComponent("nikki_state")
     end
+
     inst.components.nikki_effect._resolver = self.effect_resolver
     inst.components.nikki_skill._resolver = self.skill_resolver
     inst.components.nikki_skill._trigger_resolver = self.trigger_resolver

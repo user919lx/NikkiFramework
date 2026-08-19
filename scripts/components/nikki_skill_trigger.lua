@@ -167,27 +167,25 @@ function NikkiSkillTrigger:Trigger(trigger_type, trigger_key, params)
     end
 
     params = params or {}
-    local skill_comp = self.inst.components.nikki_skill
+    local skill_comp = self.inst.components.nikki_skill_caster
     if not skill_comp then
         return false
     end
     -- ============================================================
-    -- 主动触发：走 TryExecute（需要路由 + 封装）
+    -- 主动触发：走 TryExecute 触发动作流程
     -- ============================================================
+    local skill_id = nil
     if trigger_type == "cast" then
-        return skill_comp:TryExecute(trigger_key, params)
+        skill_id = trigger_key
+    elseif trigger_type == "keys" then
+        skill_id = self.triggers.keys[trigger_key]
     end
-
-    if trigger_type == "keys" then
-        local skill_id = self.triggers.keys[trigger_key]
-        if not skill_id then
-            return false, "NO_BINDING"
-        end
+    if skill_id then
         return skill_comp:TryExecute(skill_id, params)
     end
 
     -- ============================================================
-    -- 被动触发：直接走 Execute（上下文已完整，不需要封装）
+    -- 被动触发：直接走 Execute 不触发动作流程
     -- ============================================================
     local skill_set = self.triggers[trigger_type] and self.triggers[trigger_type][trigger_key]
     if not skill_set or next(skill_set) == nil then
@@ -197,8 +195,8 @@ function NikkiSkillTrigger:Trigger(trigger_type, trigger_key, params)
     local any_success = false
     local last_error = nil
 
-    for skill_id, _ in pairs(skill_set) do
-        local success, err = skill_comp:Execute(skill_id, params)
+    for sid, _ in pairs(skill_set) do
+        local success, err = skill_comp:Execute(sid, params)
         if success then
             any_success = true
         else

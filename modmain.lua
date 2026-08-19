@@ -21,8 +21,9 @@ GLOBAL.NikkiManager = NikkiManager
 
 
 AddModRPCHandler("NikkiFramework", "TryExecuteSkill", function(player, skill_id, target, x, z)
-    local skill_comp = player.components.nikki_skill
+    local skill_comp = player.components.nikki_skill_caster
     if not skill_comp then
+        log.debug("[RPCHandler TryExecuteSkill] Player does not have NikkiSkillCaster component")
         return
     end
     local pos = nil

@@ -143,24 +143,11 @@ function NikkiSkillTrigger:CastKey(key)
     if not skill_id then
         return false
     end
-    local def = self.inst.replica.nikki_skill and self.inst.replica.nikki_skill:GetSkillDef(skill_id)
-    if not def then
-        log.debug("[NikkiSkillTrigger Replica] Skill definition not found for skill_id '%s'", skill_id)
-        return false
+    local caster = self.inst.components.nikki_skill_caster
+    if caster then
+        return caster:TryExecute(skill_id, {})
     end
-    if def.targeting then
-        if def.targeting.mode == "target" then
-            if self:IsAiming() then
-                self:ExitAiming()
-                log.debug("[NikkiSkillTrigger Replica] Skill '%s' exits aiming mode.", skill_id)
-            else
-                self:EnterAiming(skill_id)
-                log.debug("[NikkiSkillTrigger Replica] Skill '%s' enters aiming mode.", skill_id)
-            end
-            return true
-        end
-    end
-    return self.inst.replica.nikki_skill:TryExecute(skill_id, {})
+    return false
 end
 
 
