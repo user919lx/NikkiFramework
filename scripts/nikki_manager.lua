@@ -21,19 +21,13 @@ end
 
 local function LeftClickOverride(inst, target, pos)
     if inst and inst.replica.nikki_skill_trigger and target and target:IsValid() then
-        local replica_trigger = inst.replica.nikki_skill_trigger
+        local replica_skill = inst.replica.nikki_skill
         local actions = {}
-        if replica_trigger and replica_trigger:IsAiming() then
-            local skill_id = replica_trigger:GetAimingSkill()
-            local replica_skill = inst.replica.nikki_skill
-            local skill_def = replica_skill and replica_skill:GetSkillDef(skill_id)
-            local distance = skill_def.range or ACTIONS.TARGETING.distance
-            local act = BufferedAction(inst, target, ACTIONS.TARGETING, nil, nil, nil, distance, nil, nil)
-            act.skill_fn = skill_def.fn
-            act.skill_def = skill_def
-            act.skill_name = replica_skill:GetSkillName(skill_id) or skill_id
-            act.skill_state = "dolongaction"
-            table.insert(actions, act)
+        if replica_skill then
+            local act = replica_skill:GetAvailableSkillAction(target, pos, false)
+            if act then
+                table.insert(actions, act)
+            end
         end
         if #actions > 0 then
             return actions

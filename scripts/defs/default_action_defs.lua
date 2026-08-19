@@ -1,3 +1,4 @@
+local log = require("utils/log")
 local all_actions = {
     {
         id = "NIKKI_SKILL",
@@ -17,11 +18,31 @@ local all_actions = {
             return doer.components.nikki_skill:Execute(act._skill_id, params)
         end,
         state = function(inst, act)
-            return act._skill_state or "doshortaction"
+            local state = "doshortaction"
+            if act._skill_state then
+                if type(act._skill_state) == "function" then
+                    state = act._skill_state(inst, act)
+                else
+                    state = act._skill_state
+                end
+            end
+            return state
         end,
         actiondata = {
             stroverridefn = function(act)
-                return act._display_name
+                return act._display_name or GetActionString(act.action.id)
+            end,
+            pre_action_cb = function(act)
+                local skill_id = act._skill_id
+                local pos = act:GetActionPoint()
+                local x = pos and pos.x or nil
+                local z = pos and pos.z or nil
+                SendModRPCToServer(GetModRPC("NikkiFramework", "TryExecuteSkill"),
+                    skill_id,
+                    act.target,
+                    x,
+                    z
+                )
             end,
         }
     },

@@ -27,10 +27,7 @@ local NikkiSkill = Class(function(self, inst)
 -- ============================================================
 
 function NikkiSkill:IsAdded(skill_id)
-    for _, id in ipairs(self._active_skills) do
-        if id == skill_id then return true end
-    end
-    return false
+    return table.contains(self._active_skills, skill_id)
 end
 
 function NikkiSkill:_OnSkillAdd(skill_id)
@@ -115,6 +112,7 @@ function NikkiSkill:AddSkills(ids)
         end
     end
     self:_UpdateRangeRadius()
+    self:_SyncActiveSkillsToReplica()
 end
 
 -- ============================================================
@@ -122,7 +120,6 @@ end
 -- ============================================================
 function NikkiSkill:RemoveSkills(ids)
     if not ids then return end
-
     for _, id in ipairs(ids) do
         if self:IsAdded(id) then
             local resolver = self._resolver
@@ -160,6 +157,7 @@ function NikkiSkill:RemoveSkills(ids)
         end
     end
     self:_UpdateRangeRadius()
+    self:_SyncActiveSkillsToReplica()
 end
 
 function NikkiSkill:_UpdateRangeRadius()
@@ -175,6 +173,12 @@ function NikkiSkill:_UpdateRangeRadius()
     end
     if max_range ~= self.max_range then
         self.max_range = max_range
+    end
+end
+
+function NikkiSkill:_SyncActiveSkillsToReplica()
+    if self.inst.replica.nikki_skill then
+        self.inst.replica.nikki_skill:SyncActiveSkills()
     end
 end
 
@@ -214,12 +218,15 @@ end
 
 -- 主动执行 （封装BufferAction）
 function NikkiSkill:TryExecute(skill_id, params)
+    log.debug("[NikkiSkill] TryExecute called for skill '%s' with params: %s", tostring(skill_id), tostring(params))
     local resolver = self._resolver
     if not resolver then
+        log.debug("[NikkiSkill] No resolver found for skill '%s' when trying to execute for %s.", tostring(skill_id), tostring(self.inst))
         return false, "RESOLVER_NOT_FOUND"
     end
     local def = resolver:GetDef(skill_id)
     if not def then
+        log.debug("[NikkiSkill] Skill definition not found for skill_id '%s' when trying to execute for %s.", tostring(skill_id), tostring(self.inst))
         return false, "SKILL_DEF_NOT_FOUND"
     end
     -- 无 action 块 → 直接执行（走 Execute）
@@ -238,6 +245,7 @@ function NikkiSkill:TryExecute(skill_id, params)
             target = action_def.fallback.target(self.inst, params, def)
         end
         if not target or not target:IsValid() then
+            log.debug("[NikkiSkill] Missing or invalid target for skill '%s'.", tostring(skill_id))
             return false, "MISSING_OR_INVALID_TARGET"
         end
     elseif invoke == "pos" then
@@ -245,9 +253,11 @@ function NikkiSkill:TryExecute(skill_id, params)
             pos = action_def.fallback.pos(self.inst, params, def)
         end
         if not pos then
+            log.debug("[NikkiSkill] Missing position for skill '%s'.", tostring(skill_id))
             return false, "MISSING_POS"
         end
     end
+    log.debug("[NikkiSkill] Preparing to execute skill '%s' with invoke='%s', target=%s, pos=%s", tostring(skill_id), tostring(invoke), tostring(target), tostring(pos))
     -- invoke == "instant" 不需要补全任何参数
 
     -- 5. 构造 BufferedAction
@@ -269,35 +279,35 @@ function NikkiSkill:TryExecute(skill_id, params)
     -- 6. 推送到 locomotor
     local pc = self.inst.components.playercontroller
     if not pc then
+        log.debug("[NikkiSkill] No player controller found for %s when trying to execute skill '%s'.", tostring(self.inst), tostring(skill_id))
         return false, "NO_PLAYERCONTROLLER"
     end
     pc:DoAction(act)
-    return  true
+    return true
 end
 
 -- 统一执行入口（直接执行）
 function NikkiSkill:Execute(skill_id, params)
     if not self:IsAdded(skill_id) then
+        log.warn("[NikkiSkill] Attempted to execute skill '%s' which is not added to %s.", tostring(skill_id), tostring(self.inst))
         return false, "NOT_ADDED"
     end
 
     if self:IsOnCooldown(skill_id) then
+        log.debug("[NikkiSkill] Attempted to execute skill '%s' which is on cooldown for %s.", tostring(skill_id), tostring(self.inst))
         return false, "ON_COOLDOWN"
     end
 
-    local resolver = self._resolver
-    if not resolver then
-        return false, "RESOLVER_NOT_FOUND"
-    end
-
-    local def = resolver:GetDef(skill_id)
+    local def = self._resolver and self._resolver:GetDef(skill_id)
     if not def then
+        log.debug("[NikkiSkill] Skill definition not found for skill_id '%s' when executing for %s.", tostring(skill_id), tostring(self.inst))
         return false, "SKILL_NOT_FOUND"
     end
 
     if def.required_tags then
         for _, tag in ipairs(def.required_tags) do
             if not self.inst:HasTag(tag) then
+                log.debug("[NikkiSkill] Missing required tag '%s' for skill '%s' on %s.", tostring(tag), tostring(skill_id), tostring(self.inst))
                 return false, "MISSING_TAG: " .. tag
             end
         end
@@ -306,6 +316,7 @@ function NikkiSkill:Execute(skill_id, params)
     if def.cost and def.cost.res and def.cost.amount and def.cost.amount > 0 then
         local current = ResourceAdapter.GetCurrent(self.inst, def.cost.res)
         if current < def.cost.amount then
+            log.debug("[NikkiSkill] Not enough resource '%s' for skill '%s' on %s. Required: %d, Current: %d", tostring(def.cost.res), tostring(skill_id), tostring(self.inst), def.cost.amount, current)
             return false, "NOT_ENOUGH_RESOURCE"
         end
     end
@@ -316,6 +327,7 @@ function NikkiSkill:Execute(skill_id, params)
             log.error("[NikkiSkill] Crash in '%s': %s", skill_id, tostring(result))
             return false, "EXECUTION_CRASHED"
         elseif result == false then
+            log.debug("[NikkiSkill] Execution of skill '%s' rejected for %s. Reason: %s", tostring(skill_id), tostring(self.inst), tostring(err))
             return false, err or "EXECUTION_REJECTED"
         end
     end
