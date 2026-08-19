@@ -9,24 +9,72 @@ local function GetSkillManager(self)
     return self.inst.components.nikki_skill or self.inst.replica.nikki_skill
 end
 
+local function GetRangeIndicator(inst)
+    if inst.range_indicator then
+        return inst.range_indicator
+    end
+    local indicator = SpawnPrefab("nikki_range_indicator")
+    indicator:SetOwner(inst)
+    inst.range_indicator = indicator
+    return indicator
+end
+
 -- 无状态Component Server/Client 通用
 local NikkiSkillCaster = Class(function(self, inst)
     self.inst = inst
-    -- [仅服务端] 生成并绑定虚拟施法器
-    -- if TheWorld.ismastersim then
-    --     self.spell_caster = SpawnPrefab("nikki_spell_caster")
-    --     if self.spell_caster then
-    --         self.spell_caster:Attach(inst)
-    --         inst.spell_caster = self.spell_caster
-    --     end
-    -- end
+    self._aiming_skill = nil
+    self._is_aiming = false
 end)
 
 function NikkiSkillCaster:OnRemoveFromEntity()
-    -- if TheWorld.ismastersim and self.spell_caster and self.spell_caster:IsValid() then
-    --     self.spell_caster:Remove()
-    --     self.spell_caster = nil
-    -- end
+    self:ExitAiming()
+end
+
+-- ============================================================
+-- 瞄准状态管理 (Targeting)
+-- ============================================================
+function NikkiSkillCaster:EnterAiming(skill_id)
+    self._aiming_skill = skill_id
+    self._is_aiming = true
+    log.debug("[NikkiSkillCaster] Enter aiming for skill: %s", tostring(skill_id))
+
+    local skill_manager = GetSkillManager(self)
+    if skill_manager then
+        local range = skill_manager:GetSkillRange(skill_id)
+        local indicator = GetRangeIndicator(self.inst)
+        if indicator and range and range > 0 then
+            indicator:EnterOverride(range)
+        end
+    end
+end
+
+function NikkiSkillCaster:ExitAiming()
+    self._aiming_skill = nil
+    self._is_aiming = false
+    log.debug("[NikkiSkillCaster] Exit aiming")
+
+    local indicator = GetRangeIndicator(self.inst)
+    if indicator then
+        indicator:ExitOverride()
+    end
+end
+
+function NikkiSkillCaster:ToggleAiming(skill_id)
+    if self:IsAiming() and self._aiming_skill == skill_id then
+        self:ExitAiming()
+        return false
+    else
+        self:EnterAiming(skill_id)
+        return true
+    end
+end
+
+function NikkiSkillCaster:IsAiming()
+    return self._is_aiming and self._aiming_skill ~= nil
+end
+
+function NikkiSkillCaster:GetAimingSkill()
+    return self._aiming_skill
 end
 
 -- ============================================================
@@ -35,9 +83,8 @@ end
 function NikkiSkillCaster:BuildBufferedAction(target, pos, skill_id, is_client)
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return nil end
-    local def = skill_manager:GetSkillDef(skill_id)
-    if not def or not def.action then return nil end
-
+    local action_def = skill_manager:GetSkillActionDef(skill_id) or {}
+    local range = skill_manager:GetSkillRange(skill_id)
     local act = BufferedAction(
         self.inst,
         target,
@@ -45,13 +92,12 @@ function NikkiSkillCaster:BuildBufferedAction(target, pos, skill_id, is_client)
         nil,
         pos,
         nil,
-        def.range or 0
+        range or 0
     )
     act._skill_id = skill_id
-    act._skill_state = def.action.state or "doshortaction"
+    act._skill_state = action_def.state or "doshortaction"
     act._display_name = skill_manager:GetSkillName(skill_id) or skill_id
 
-    -- 客户端需要附加 RPC 预览回调
     if is_client then
         pos = pos or {}
         local x, z = pos.x, pos.z
@@ -67,19 +113,46 @@ function NikkiSkillCaster:BuildBufferedAction(target, pos, skill_id, is_client)
     return act
 end
 
+-- 专门用于构建 Target 瞄准动作的入口 (所有校验与获取收归内部)
+function NikkiSkillCaster:BuildTargetAimAction(target)
+    if not target or not target:IsValid() then
+        return nil
+    end
+
+    local skill_id = self:GetAimingSkill()
+    if not skill_id then
+        return nil
+    end
+
+    local skill_manager = GetSkillManager(self)
+    if not skill_manager then
+        return nil
+    end
+
+    -- 强制校验：必须具备 targeting 定义且必须提供 testfn 校验函数
+    local targeting_def = skill_manager.GetSkillTargetingDef and skill_manager:GetSkillTargetingDef(skill_id)
+    if not targeting_def or type(targeting_def.testfn) ~= "function" then
+        return nil
+    end
+
+    -- 执行目标过滤判定
+    if targeting_def.testfn(self.inst, target) ~= true then
+        return nil
+    end
+
+    return self:BuildBufferedAction(target, nil, skill_id, not TheWorld.ismastersim)
+end
+
 function NikkiSkillCaster:GetAvailableSkillAction(target, pos, right)
     if not self.inst or not self.inst:IsValid() then return nil end
 
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return nil end
 
-    -- 明确：active_skills 是一组有序的 Array Table (例如: {"skill_a", "skill_b"})
     local active_skills = skill_manager:GetActiveSkills()
     if not active_skills or #active_skills == 0 then return nil end
 
     local candidates = {}
-
-    -- 用 ipairs 遍历 Array 才是最合理的！
     for _, skill_id in ipairs(active_skills) do
         local action_def = skill_manager:GetSkillActionDef(skill_id)
         if action_def and action_def.invoke ~= "instant" and action_def.testfn then
@@ -106,7 +179,6 @@ end
 function NikkiSkillCaster:TryExecute(skill_id, params)
     log.debug("[NikkiSkillCaster] TryExecute called for skill '%s' with params: %s", tostring(skill_id), tostring(params))
 
-    -- 注意：主客机通用组件，通过统一入口获取技能管理器
     local skill_manager = GetSkillManager(self)
     if not skill_manager then
         log.debug("[NikkiSkillCaster] No skill manager found")
@@ -118,45 +190,39 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
         log.debug("[NikkiSkillCaster] Skill definition not found for skill '%s'", tostring(skill_id))
         return false, "SKILL_DEF_NOT_FOUND"
     end
+    local is_rpc = params and params.is_rpc
+    local is_client = not TheWorld.ismastersim
+    -- 只有非 RPC 发起（即玩家本地交互）且具备 targeting 定义时，才触发瞄准切换
+    local targeting_def = skill_manager:GetSkillTargetingDef(skill_id)
+    if targeting_def and not is_rpc then
+        local mode = targeting_def.mode
+        if mode == "target" then
+            log.debug("[NikkiSkillCaster] Toggled aiming for skill '%s'", tostring(skill_id))
+            self:ToggleAiming(skill_id)
+            return true
+        elseif mode == "pos" then
+            -- TODO AOE / Reticule 网格瞄准逻辑
+        end
+    end
 
-    -- 分支 A：具有 AOE Targeting 属性的技能（需官方瞄准）
-    -- TODO: 目前暂不支持官方 AOE 瞄准，后续可考虑通过扩展 PlayerController 来实现
-    -- if def.targeting and def.targeting.use_official_aoe then
-    --     local pc = self.inst.components.playercontroller
-    --     if not pc then return false, "NO_PLAYERCONTROLLER" end
-
-    --     local skill_index = skill_manager.skill_index_map and skill_manager.skill_index_map[skill_id]
-    --     if not skill_index then return false, "NOT_IN_SPELLBOOK" end
-
-    --     local caster_inst = self.inst.spell_caster
-    --     if caster_inst and caster_inst.components.spellbook then
-    --         caster_inst.components.spellbook:SelectSpell(skill_index)
-    --         pc:StartAOETargetingUsing(caster_inst)
-    --         return true
-    --     end
-    --     return false
-    -- end
-
-    -- 分支 B：非官方 AOE，且无 action（瞬发技能）
+    -- 瞬发技能逻辑
     local action_def = def.action
     if not action_def then
         if TheWorld.ismastersim then
-            log.debug("[NikkiSkillCaster] Executing instant skill '%s' on server", tostring(skill_id))
+            log.debug("[NikkiSkillCaster] Executing instant skill '%s' directly on server", tostring(skill_id))
             return self:Execute(skill_id, params)
         else
-            log.debug("[NikkiSkillCaster] Sending RPC to server to execute instant skill '%s'", tostring(skill_id))
+            log.debug("[NikkiSkillCaster] Sending TryExecuteSkill RPC for skill '%s' to server", tostring(skill_id))
             SendModRPCToServer(GetModRPC("NikkiFramework", "TryExecuteSkill"), skill_id)
             return true
         end
     end
-    log.debug("[NikkiSkillCaster] Skill '%s' has action defined, proceeding to build BufferedAction", tostring(skill_id))
 
-    -- 分支 C：需要补全 target/pos，发送 BufferedAction
+    -- 参数补全 (fallback)
     local invoke = action_def.invoke or "instant"
-    local target = params.target
-    local pos = params.pos
+    local target = params and params.target
+    local pos = params and params.pos
 
-    -- 补全参数（fallback）
     if invoke == "target" then
         if not target and action_def.fallback and action_def.fallback.target then
             target = action_def.fallback.target(self.inst, params, def)
@@ -169,15 +235,21 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
         if not pos then return false, "MISSING_POS" end
     end
 
-    local act = self:BuildBufferedAction(target, pos, skill_id, not TheWorld.ismastersim)
-    if not act then return false, "BUILD_ACTION_FAILED" end
+    local act = self:BuildBufferedAction(target, pos, skill_id, is_client)
+    log.debug("[NikkiSkillCaster] Built buffered action for skill '%s': %s, is_client=%s", tostring(skill_id),
+    tostring(act), tostring(is_client))
+    if not act then
+        log.debug("[NikkiSkillCaster] Failed to build buffered action for skill '%s'", tostring(skill_id))
+        return false, "BUILD_ACTION_FAILED"
+    end
 
     local pc = self.inst.components.playercontroller
     if pc then
         pc:DoAction(act)
+        log.debug("[NikkiSkillCaster] Action for skill '%s' dispatched to player controller", tostring(skill_id))
         return true
     end
-
+    log.debug("[NikkiSkillCaster] No player controller found to dispatch action for skill '%s'", tostring(skill_id))
     return false
 end
 
@@ -187,7 +259,6 @@ end
 function NikkiSkillCaster:Execute(skill_id, params)
     if not TheWorld.ismastersim then return false end
 
-    -- 服务端写操作通过统一入口获取（优先 components）
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return false, "NO_MANAGER" end
 

@@ -165,11 +165,9 @@ function NikkiSkill:AddSkills(ids)
     self:_UpdateSkillStatus()
 end
 
-function NikkiSkill:RemoveSkills(ids, update_status)
+function NikkiSkill:RemoveSkills(ids)
     self:_RemoveSkillsInternal(ids)
-    if update_status then
-        self:_UpdateSkillStatus()
-    end
+    self:_UpdateSkillStatus()
 end
 
 -- ============================================================
@@ -221,12 +219,19 @@ function NikkiSkill:GetActiveSkills()
     end
     return list
 end
+
 -- ============================================================
 -- 静态查询接口 (转发SkillResolver)
 -- ============================================================
 function NikkiSkill:GetSkillActionDef(id)
     if self._resolver then
         return self._resolver:GetActionDef(id)
+    end
+end
+
+function NikkiSkill:GetSkillTargetingDef(id)
+    if self._resolver then
+        return self._resolver:GetTargetingDef(id)
     end
 end
 

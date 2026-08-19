@@ -30,7 +30,7 @@ AddModRPCHandler("NikkiFramework", "TryExecuteSkill", function(player, skill_id,
     if x and z then
         pos = GLOBAL.Vector3(x, 0, z)
     end
-    skill_comp:TryExecute(skill_id, { target = target, pos = pos })
+    skill_comp:TryExecute(skill_id, { target = target, pos = pos , is_rpc = true})
 end)
 
 

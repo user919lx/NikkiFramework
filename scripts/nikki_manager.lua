@@ -21,21 +21,38 @@ end
 
 local function MakeClickOverride(is_right_click)
     return function(inst, target, pos)
-        if inst and inst.components.nikki_skill_caster and target and target:IsValid() then
-            local cmp_caster = inst.components.nikki_skill_caster
-            local actions = {}
-            if cmp_caster then
-                -- 唯一差异：传入 is_right_click 作为最后一个参数
-                local act = cmp_caster:GetAvailableSkillAction(target, pos, is_right_click)
-                if act then
-                    table.insert(actions, act)
-                end
-            end
-            if #actions > 0 then
+        if not inst then
+            return {}, true
+        end
+
+        local cmp_caster = inst.components.nikki_skill_caster
+        if not cmp_caster then
+            return {}, true
+        end
+
+        local actions = {}
+
+        -- 右键且处于瞄准状态优先尝试获取瞄准动作
+        if is_right_click and cmp_caster:IsAiming() then
+            local act = cmp_caster:BuildTargetAimAction(target)
+            if act then
+                table.insert(actions, act)
                 return actions
+            else
+                return {}, true
             end
         end
-        -- 无可用动作时返回空表 + true，保持与原逻辑一致
+
+        -- 常规上下文动作匹配
+        local act = cmp_caster:GetAvailableSkillAction(target, pos, is_right_click)
+        if act then
+            table.insert(actions, act)
+        end
+
+        if #actions > 0 then
+            return actions
+        end
+
         return {}, true
     end
 end

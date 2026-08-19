@@ -1,29 +1,17 @@
 -- scripts/components/nikki_skill_trigger_replica.lua
 local log = require("utils/log")
 
-local function GetRangeIndicator (inst)
-    if inst.range_indicator then
-        return inst.range_indicator
-    end
-    local indicator = SpawnPrefab("nikki_range_indicator")
-    indicator:SetOwner(inst)
-    inst.range_indicator = indicator
-    return indicator
-end
-
 local NikkiSkillTrigger = Class(function(self, inst)
     self.inst = inst
-
     self._keys = {}
-    self._aiming = false
-    self._aiming_skill = nil
-    self._aiming_params = nil
 
     self.inst:ListenForEvent("nikki_state_dirty", function(inst, data)
         local state = data and data.state
         local old_state = data and data.old_state
         self:_RefreshKeys(state, old_state)
-        self:ExitAiming()
+        if self.inst.components.nikki_skill_caster then
+            self.inst.components.nikki_skill_caster:ExitAiming()
+        end
     end)
 end)
 
@@ -35,7 +23,9 @@ function NikkiSkillTrigger:Init(resolver)
     self._resolver = resolver
     self:_RefreshKeys(self._resolver:GetBasicState(), nil)
     self:_RefreshKeys()
-    self:ExitAiming()
+    if self.inst.components.nikki_skill_caster then
+        self.inst.components.nikki_skill_caster:ExitAiming()
+    end
 end
 
 function NikkiSkillTrigger:AddKey(key_code, skill_id)
@@ -47,23 +37,15 @@ function NikkiSkillTrigger:RemoveKey(key_code)
 end
 
 function NikkiSkillTrigger:_RefreshKeys(current_state, old_state)
-    log.debug("[NikkiSkillTrigger Replica] Refreshing keys for state '%s' (old_state=%s)", current_state,
-        tostring(old_state))
     local resolver = self._resolver
-    if not resolver then
-        log.debug("[NikkiSkillTrigger Replica] No resolver available to refresh keys.")
-        return
-    end
+    if not resolver then return end
 
     if not current_state then
         local state_comp = self.inst.replica.nikki_state
         if state_comp then
             current_state = state_comp:GetState()
         end
-        if not current_state then
-            log.debug("[NikkiSkillTrigger Replica] No state available to refresh keys.")
-            return
-        end
+        if not current_state then return end
     end
 
     if old_state then
@@ -72,15 +54,12 @@ function NikkiSkillTrigger:_RefreshKeys(current_state, old_state)
             for key_code, _ in pairs(old_def.keys) do
                 self:RemoveKey(key_code)
             end
-            log.debug("[NikkiSkillTrigger Replica] Removed keys for old state '%s'", old_state)
         end
     end
 
     local state_def = resolver:GetStateDef(current_state)
-    if not state_def then
-        log.debug("[NikkiSkillTrigger Replica] State definition not found for '%s'", current_state)
-        return
-    end
+    if not state_def then return end
+
     if state_def.keys and next(state_def.keys) then
         for key_code, skill_id in pairs(state_def.keys) do
             self:AddKey(key_code, skill_id)
@@ -92,63 +71,24 @@ function NikkiSkillTrigger:GetSkillsForKey(key_code)
     return self._keys[key_code]
 end
 
-
 -- ============================================================
--- 瞄准状态管理（客户端）
--- ============================================================
-function NikkiSkillTrigger:EnterAiming(skill_id)
-    self._aiming = true
-    self._aiming_skill = skill_id
-    log.debug("[NikkiSkillTrigger Replica] Enter aiming for skill: %s", skill_id)
-
-    local indicator = GetRangeIndicator(self.inst)
-    if indicator then
-        local range = self.inst.replica.nikki_skill and self.inst.replica.nikki_skill:GetSkillRange(skill_id)
-        if range and range > 0 then
-            indicator:EnterOverride(range)
-        else
-            log.debug("[NikkiSkillTrigger Replica] Skill '%s' has no range, not overriding indicator", skill_id)
-        end
-    else
-        log.debug("[NikkiSkillTrigger Replica] No range indicator found on owner")
-    end
-end
-
-function NikkiSkillTrigger:ExitAiming()
-    self._aiming = false
-    self._aiming_skill = nil
-    log.debug("[NikkiSkillTrigger Replica] Exit aiming")
-    local indicator = GetRangeIndicator(self.inst)
-    if indicator then
-        indicator:ExitOverride()
-    end
-end
-
-function NikkiSkillTrigger:IsAiming()
-    return self._aiming
-end
-
-function NikkiSkillTrigger:GetAimingSkill()
-    return self._aiming_skill
-end
-
--- ============================================================
--- 按键触发（客户端处理）
+-- 按键触发（客户端路由到通用 Caster）
 -- ============================================================
 function NikkiSkillTrigger:CastKey(key)
     if self.inst.components.nikki_skill_trigger then
         return self.inst.components.nikki_skill_trigger:Trigger("keys", key)
     end
+
     local skill_id = self:GetSkillsForKey(key)
     if not skill_id then
         return false
     end
+
     local caster = self.inst.components.nikki_skill_caster
     if caster then
         return caster:TryExecute(skill_id, {})
     end
     return false
 end
-
 
 return NikkiSkillTrigger

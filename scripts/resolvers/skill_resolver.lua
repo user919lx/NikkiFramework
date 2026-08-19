@@ -243,6 +243,12 @@ function SkillResolver:GetActionDef(skill_id)
     return def and def.action or nil
 end
 
+function SkillResolver:GetTargetingDef(skill_id)
+    local def = self:GetDef(skill_id)
+    return def and def.targeting or nil
+end
+
+
 function SkillResolver:NeedsServer(skill_id)
     local def = self:GetDef(skill_id)
     if def then

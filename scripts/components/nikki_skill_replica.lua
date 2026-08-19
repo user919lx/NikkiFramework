@@ -75,6 +75,7 @@ function NikkiSkill:GetActiveSkills()
     end
     return list
 end
+
 -- ============================================================
 -- 静态查询接口 (转发SkillResolver)
 -- ============================================================
@@ -87,6 +88,12 @@ end
 function NikkiSkill:GetSkillActionDef(id)
     if self._resolver then
         return self._resolver:GetActionDef(id)
+    end
+end
+
+function NikkiSkill:GetSkillTargetingDef(id)
+    if self._resolver then
+        return self._resolver:GetTargetingDef(id)
     end
 end
 
