@@ -639,6 +639,10 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
     inst:AddTag("nikki_framework")
 
     if tier_level >= 3 then
+        -- 用于 Replica 初始化装配Resolver
+        inst._replica_skill_resolver = self.skill_resolver
+        inst._replica_state_resolver = self.state_resolver
+        inst._replica_skill_trigger_resolver = self.state_resolver
         -- HUD 处理
         inst:DoTaskInTime(0, function()
             if not TheNet:IsDedicated() and inst == ThePlayer then
@@ -652,20 +656,6 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
                 inst.components.playeractionpicker.rightclickoverride = MakeClickOverride(true)
                 if not inst.components.nikki_skill_caster then
                     inst:AddComponent("nikki_skill_caster")
-                end
-                if inst.replica then
-                    if inst.replica.nikki_skill then
-                        inst.replica.nikki_skill._resolver = self.skill_resolver
-                    end
-                    if inst.replica.nikki_state then
-                        inst.replica.nikki_state._resolver = self.state_resolver
-                    end
-                    if inst.replica.nikki_skill_trigger then
-                        inst.replica.nikki_skill_trigger:Init(self.state_resolver)
-                    end
-                    if inst.replica.nikki_skillwheel then
-                        inst.replica.nikki_skillwheel._resolver = self.skill_resolver
-                    end
                 end
             end
         end)

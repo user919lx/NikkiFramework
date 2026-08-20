@@ -4,14 +4,14 @@ local log = require("utils/log")
 local NikkiSkillTrigger = Class(function(self, inst)
     self.inst = inst
     self._keys = {}
+    self:Init(inst._replica_skill_trigger_resolver)
+    inst._replica_skill_trigger_resolver = nil
+
 
     self.inst:ListenForEvent("nikki_state_dirty", function(inst, data)
         local state = data and data.state
         local old_state = data and data.old_state
         self:_RefreshKeys(state, old_state)
-        if self.inst.components.nikki_skill_caster then
-            self.inst.components.nikki_skill_caster:ExitAiming()
-        end
     end)
 end)
 
@@ -21,7 +21,7 @@ function NikkiSkillTrigger:Init(resolver)
         return
     end
     self._resolver = resolver
-    self:_RefreshKeys(self._resolver:GetBasicState(), nil)
+    self:_RefreshKeys(self._resolver:GetBasicState())
     self:_RefreshKeys()
     if self.inst.components.nikki_skill_caster then
         self.inst.components.nikki_skill_caster:ExitAiming()

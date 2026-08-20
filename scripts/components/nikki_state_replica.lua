@@ -8,6 +8,8 @@ local NikkiStateReplica = Class(function(self, inst)
     self._old_state = net_string(inst.GUID, "nikki_state._old_state")
     self._state:set(DEFAULT_STATE)
     self._old_state:set(DEFAULT_STATE)
+    self._resolver = inst._replica_state_resolver
+    inst._replica_state_resolver = nil
 
     if not TheWorld.ismastersim then
         inst:ListenForEvent("nikki_statedirty", function()
@@ -27,7 +29,6 @@ end
 function NikkiStateReplica:GetState()
     return self._state:value() or DEFAULT_STATE
 end
-
 
 function NikkiStateReplica:GetBadges()
     local resolver = self._resolver

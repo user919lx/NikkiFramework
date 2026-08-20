@@ -10,7 +10,8 @@ local NikkiSkill = Class(function(self, inst)
     self._active_skills_cache = {}
     self._skill_index_map = {}
 
-    self._resolver = nil
+    self._resolver = inst._replica_skill_resolver
+    inst._replica_skill_resolver = nil
 
     if not TheWorld.ismastersim then
         inst:ListenForEvent("skill_maxrangedirty", function()
