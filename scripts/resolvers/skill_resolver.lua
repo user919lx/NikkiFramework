@@ -33,229 +33,178 @@ local SkillResolver = Class(BaseResolver, function(self, defs)
 end)
 
 -- ============================================================
--- 技能定义添加钩子（编译时）
--- 注意：default_triggers 和 toggle 已在 manager 层预处理并删除
---       这里只处理 wheel 编译
+-- 1. 编译生命周期钩子
 -- ============================================================
+-- 预编译添加信息
 function SkillResolver:OnDefAdded(skill_id, def)
+    def.priority = def.priority or 0
+    local has_wheel = def.wheel ~= nil
+    local targeting_def = def.targeting
+    local is_pos_targeting = targeting_def and targeting_def.mode == "pos"
+    local is_spell_item = has_wheel or is_pos_targeting
+    def.is_spell_item = is_spell_item
+
     -- Wheel 编译
-    if type(def.wheel) == "table" and type(def.wheel.ui) == "table" then
-        local w_def = def.wheel
-        local ui = w_def.ui
-        local aoe = w_def.aoe or {}
+    -- if type(def.wheel) == "table" and type(def.wheel.ui) == "table" then
+    --     local w_def = def.wheel
+    --     local ui = w_def.ui
+    --     local aoe = w_def.aoe or {}
 
-        local anim_cfg = ui.anim or (ui.bank and ui)
-        local image_cfg = ui.image or (ui.atlas and ui)
-        local is_anim = anim_cfg ~= nil and (anim_cfg.bank or anim_cfg.build or anim_cfg.anims)
+    --     local anim_cfg = ui.anim or (ui.bank and ui)
+    --     local image_cfg = ui.image or (ui.atlas and ui)
+    --     local is_anim = anim_cfg ~= nil and (anim_cfg.bank or anim_cfg.build or anim_cfg.anims)
 
-        local checkcooldown_fn = nil
-        local checkenabled_fn = nil
+    --     local checkcooldown_fn = nil
+    --     local checkenabled_fn = nil
 
-        if is_anim then
-            checkcooldown_fn = function(owner)
-                if owner and owner.components.spellbookcooldowns then
-                    return owner.components.spellbookcooldowns:GetSpellCooldownPercent(skill_id)
-                end
-                return nil
-            end
-            checkenabled_fn = ui.checkenabled
-        else
-            local user_checkenabled = ui.checkenabled
-            checkenabled_fn = function(owner)
-                if owner and owner.components.spellbookcooldowns and owner.components.spellbookcooldowns:IsInCooldown(skill_id) then
-                    return false
-                end
-                if user_checkenabled then
-                    return user_checkenabled(owner)
-                end
-                return true
-            end
-        end
+    --     if is_anim then
+    --         checkcooldown_fn = function(owner)
+    --             if owner and owner.components.spellbookcooldowns then
+    --                 return owner.components.spellbookcooldowns:GetSpellCooldownPercent(skill_id)
+    --             end
+    --             return nil
+    --         end
+    --         checkenabled_fn = ui.checkenabled
+    --     else
+    --         local user_checkenabled = ui.checkenabled
+    --         checkenabled_fn = function(owner)
+    --             if owner and owner.components.spellbookcooldowns and owner.components.spellbookcooldowns:IsInCooldown(skill_id) then
+    --                 return false
+    --             end
+    --             if user_checkenabled then
+    --                 return user_checkenabled(owner)
+    --             end
+    --             return true
+    --         end
+    --     end
 
-        self.compiled_wheels[skill_id] = {
-            id = skill_id,
-            name = def.name or skill_id,
-            instant = w_def.instant == true,
-            is_anim = is_anim,
-            anim_cfg = is_anim and anim_cfg or nil,
-            image_cfg = (not is_anim) and image_cfg or nil,
-            checkcooldown = checkcooldown_fn,
-            checkenabled = checkenabled_fn,
-            widget_scale = ui.widget_scale or 0.6,
-            hit_radius = ui.hit_radius or (not is_anim and 50 or nil),
-            clicksound = ui.clicksound,
-            spacer = ui.spacer,
-            nestedwheel = ui.nestedwheel,
-            helptext = ui.helptext,
-            aoe = aoe,
-            state = aoe.state,
-            allow_water = aoe.allow_water,
-            deploy_radius = aoe.deploy_radius,
-            target_fx = aoe.target_fx,
-            should_repeat_cast_fn = aoe.should_repeat_cast_fn,
-            reticule = aoe.reticule,
-        }
-    end
+    --     self.compiled_wheels[skill_id] = {
+    --         id = skill_id,
+    --         name = def.name or skill_id,
+    --         instant = w_def.instant == true,
+    --         is_anim = is_anim,
+    --         anim_cfg = is_anim and anim_cfg or nil,
+    --         image_cfg = (not is_anim) and image_cfg or nil,
+    --         checkcooldown = checkcooldown_fn,
+    --         checkenabled = checkenabled_fn,
+    --         widget_scale = ui.widget_scale or 0.6,
+    --         hit_radius = ui.hit_radius or (not is_anim and 50 or nil),
+    --         clicksound = ui.clicksound,
+    --         spacer = ui.spacer,
+    --         nestedwheel = ui.nestedwheel,
+    --         helptext = ui.helptext,
+    --         aoe = aoe,
+    --         state = aoe.state,
+    --         allow_water = aoe.allow_water,
+    --         deploy_radius = aoe.deploy_radius,
+    --         target_fx = aoe.target_fx,
+    --         should_repeat_cast_fn = aoe.should_repeat_cast_fn,
+    --         reticule = aoe.reticule,
+    --     }
+    -- end
 end
 
 -- ============================================================
--- 纯查询接口
+-- 属性查询
 -- ============================================================
-
-function SkillResolver:IsWheelSkill(skill_id)
-    return self.compiled_wheels ~= nil and self.compiled_wheels[skill_id] ~= nil
+function SkillResolver:GetPriority(skill_id)
+    local def = self:GetDef(skill_id)
+    return def and def.priority or 0
 end
-
-function SkillResolver:BuildWheelItem(skill_id, user, order)
-    local compiled = self.compiled_wheels and self.compiled_wheels[skill_id]
-    if not compiled then return nil end
-
-    local is_aoe = (compiled.aoe ~= nil and next(compiled.aoe) ~= nil)
-    local is_instant = compiled.instant
-
-    local item = {
-        label = self:GetDisplayName(skill_id),
-        id = skill_id,
-        checkenabled = compiled.checkenabled,
-        checkcooldown = compiled.checkcooldown,
-        widget_scale = compiled.widget_scale,
-        hit_radius = compiled.hit_radius,
-        clicksound = compiled.clicksound,
-        spacer = compiled.spacer,
-        nestedwheel = compiled.nestedwheel,
-        helptext = compiled.helptext,
-        order = order or 1,
-    }
-
-    if compiled.is_anim then
-        local a = compiled.anim_cfg
-        item.bank = a.bank
-        item.build = a.build
-        item.anims = a.anims
-        item.cooldowncolor = a.cooldowncolor or { 0.65, 0.65, 0.65, 0.75 }
-    else
-        local img = compiled.image_cfg
-        item.atlas = img.atlas
-        item.normal = img.normal
-        item.focus = img.focus
-        item.disabled = img.disabled
-        item.down = img.down
-        item.selected = img.selected
-    end
-
-    item.execute = function(spell_caster)
-        local doer = GetCasterOwner(spell_caster)
-        if not doer then return end
-
-        if is_aoe then
-            if doer.components.playercontroller then
-                return doer.components.playercontroller:StartAOETargetingUsing(spell_caster)
-            end
-        elseif is_instant then
-            if doer.replica.nikki_skill_trigger then
-                return doer.replica.nikki_skill_trigger:CastSkill(skill_id)
-            end
-        else
-            if doer.replica.inventory then
-                return doer.replica.inventory:CastSpellBookFromInv(spell_caster)
-            end
-        end
-    end
-
-    item.onselect = function(spell_caster)
-        if spell_caster.components.spellbook then
-            spell_caster.components.spellbook:SetSpellName(item.label)
-        end
-
-        if is_aoe then
-            for _, tags in pairs(SG_STATE_MAP) do
-                for _, tag in ipairs(tags) do
-                    spell_caster:RemoveTag(tag)
-                end
-            end
-            if compiled.state and SG_STATE_MAP[compiled.state] then
-                for _, tag in ipairs(SG_STATE_MAP[compiled.state]) do
-                    spell_caster:AddTag(tag)
-                end
-            end
-
-            if spell_caster.components.aoetargeting then
-                spell_caster.components.aoetargeting:SetAllowWater(compiled.allow_water or false)
-                spell_caster.components.aoetargeting:SetDeployRadius(compiled.deploy_radius or 0)
-
-                local native_reticule = spell_caster.components.aoetargeting.reticule
-                if native_reticule then
-                    native_reticule.targetfn = nil
-                    native_reticule.mousetargetfn = nil
-                    native_reticule.updatepositionfn = nil
-                    native_reticule.validcolour = { 1, .75, 0, 1 }
-                    native_reticule.invalidcolour = { .5, 0, 0, 1 }
-                    native_reticule.ease = true
-                    native_reticule.mouseenabled = true
-                    native_reticule.twinstickmode = 1
-                    native_reticule.twinstickrange = 8
-
-                    if compiled.reticule then
-                        for k, v in pairs(compiled.reticule) do
-                            native_reticule[k] = v
-                        end
-                    end
-                end
-                spell_caster.components.aoetargeting:SetShouldRepeatCastFn(compiled.should_repeat_cast_fn)
-            end
-        end
-
-        if TheWorld.ismastersim then
-            if is_aoe then
-                spell_caster.components.aoetargeting:SetTargetFX(compiled.target_fx or nil)
-                spell_caster.components.spellbook:SetSpellFn(nil)
-                spell_caster.components.aoespell:SetSpellFn(function(caster_inst, doer, pos)
-                    local params = { pos = pos }
-                    if doer.components.nikki_skill then
-                        return doer.components.nikki_skill:CastSkill(skill_id, params)
-                    end
-                end)
-            elseif not is_instant then
-                spell_caster.components.aoespell:SetSpellFn(nil)
-                spell_caster.components.spellbook:SetSpellFn(function(caster_inst, doer)
-                    if doer.components.nikki_skill then
-                        return doer.components.nikki_skill:CastSkill(skill_id)
-                    end
-                end)
-            end
-        end
-    end
-    return item
-end
-
+--- 获取射程范围
 function SkillResolver:GetRange(skill_id)
     local def = self:GetDef(skill_id)
     return def and def.range or nil
 end
 
+--- 获取基础冷却时间
 function SkillResolver:GetCooldown(skill_id)
     local def = self:GetDef(skill_id)
     return def and def.cd or 0
 end
 
+--- 获取动作定义
 function SkillResolver:GetActionDef(skill_id)
     local def = self:GetDef(skill_id)
     return def and def.action or nil
 end
 
+--- 获取瞄准配置定义
 function SkillResolver:GetTargetingDef(skill_id)
     local def = self:GetDef(skill_id)
     return def and def.targeting or nil
 end
 
+-- ============================================================
+-- 3. 施法装配和查询
+-- ============================================================
 
-function SkillResolver:NeedsServer(skill_id)
+--- 查询指定技能是否已编译轮盘配置
+function SkillResolver:IsSpellItem(skill_id)
+    local def = self:GetDef(skill_id)
+    return def and def.is_spell_item == true or false
+end
+
+--- 根据活跃技能列表过滤并提取可展示在轮盘/施法书中的技能 ID 列表
+---@param skill_ids string[] 当前活跃技能 ID 数组
+---@return string[] 适用于轮盘展示的技能 ID 列表
+function SkillResolver:FilterSpellIds(skill_ids)
+    if not skill_ids or #skill_ids == 0 then
+        return {}
+    end
+    local valid_items = {}
+    for _, skill_id in ipairs(skill_ids) do
+        if self:IsSpellItem(skill_id) then
+            table.insert(valid_items, skill_id)
+        end
+    end
+    table.sort(valid_items, function(a, b)
+        return self:GetPriority(a) > self:GetPriority(b)
+    end)
+    return valid_items
+end
+
+--- 构建供 Spell 使用的数据条目
+--- @param skill_id string 技能 ID
+--- @param user EntityScript 施法者实体
+--- @return table item 供 spellbook组件 使用的条目
+function SkillResolver:_BuildSpellItem(skill_id, order)
+    local item = {
+        skill_id = skill_id,
+        order = order,
+    }
     local def = self:GetDef(skill_id)
     if def then
-        if def.client_only then return false end
-        if type(def.fn) == "function" then return true end
+        item.ui = {
+            label = self:GetDisplayName(skill_id),
+        }
+        item.onselect = function(spell_caster)
+            spell_caster.components.spellbook:SetSpellAction(nil)
+        end
     end
-    return false
+
+    return item
+end
+
+--- 批量构建供 spellbook组件 使用的 Items 数组（保持原数组顺序）
+---@param skill_ids string[] 有序技能 ID 列表
+---@param user EntityScript 施法者实体
+---@return table[] items  用于spellbook组件 SetItems的数组
+function SkillResolver:BuildSpellItemsByIds(skill_ids)
+    if not skill_ids or #skill_ids == 0 then
+        return {}
+    end
+    local items = {}
+    for order, skill_id in ipairs(skill_ids) do
+        local item = self:_BuildSpellItem(skill_id, order)
+        if item then
+            table.insert(items, item)
+        end
+    end
+    table.sort(items, function(a, b)
+        return (a.order or 0) < (b.order or 0)
+    end)
+    return items
 end
 
 return SkillResolver

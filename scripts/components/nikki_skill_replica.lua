@@ -8,7 +8,7 @@ local NikkiSkill = Class(function(self, inst)
 
     self._active_skills_str = net_string(inst.GUID, "skill._active_skills_str", "skill_activeskillsdirty")
     self._active_skills_cache = {}
-    self.skill_index_map = {}
+    self._skill_index_map = {}
 
     self._resolver = nil
 
@@ -23,29 +23,37 @@ local NikkiSkill = Class(function(self, inst)
             for id in string.gmatch(str or "", "[^,]+") do
                 self._active_skills_cache[id] = true
             end
+            self:_UpdateSpellbookItems()
             log.debug("[NikkiSkill Replica] Updated active skills cache: %s", str)
         end)
     end
 end)
 
-function NikkiSkill:_ClientUpdateSpellbookItems(active_list)
-    -- TODO: 更新spellitem逻辑
+
+-- ============================================================
+-- 数据同步 (Client)
+-- ============================================================
+function NikkiSkill:_UpdateSpellbookItems()
+    local resolver = self._resolver
+    if not resolver then
+        log.debug("[NikkiSkill Replica] No resolver set, cannot update spell items")
+        return
+    end
+    local active_skills = self:GetActiveSkills()
+    local spell_ids = resolver:FilterSpellIds(active_skills)
+    self._skill_index_map = {}
+    for index, skill_id in ipairs(spell_ids) do
+        self._skill_index_map[skill_id] = index
+    end
+    self.inst:PushEvent("nikki_spell_items_dirty")
 end
 
 -- ============================================================
--- 网络同步
+-- 数据同步 (Server)
 -- ============================================================
 
 function NikkiSkill:SetMaxRange(range)
     self._max_range:set(range or 0)
-end
-
-function NikkiSkill:GetMaxRange()
-    if self.inst.components.nikki_skill ~= nil then
-        return self.inst.components.nikki_skill.max_range
-    else
-        return self._max_range:value()
-    end
 end
 
 function NikkiSkill:SyncActiveSkills()
@@ -76,6 +84,25 @@ function NikkiSkill:GetActiveSkills()
     return list
 end
 
+function NikkiSkill:GetMaxRange()
+    if self.inst.components.nikki_skill ~= nil then
+        return self.inst.components.nikki_skill.max_range
+    else
+        return self._max_range:value()
+    end
+end
+
+function NikkiSkill:GetSkillSpellIndex(skill_id)
+    return self._skill_index_map and self._skill_index_map[skill_id]
+end
+
+function NikkiSkill:GetSpellItems()
+    local resolver = self._resolver
+    if not resolver then return {} end
+    local active_skills = self:GetActiveSkills()
+    local spell_ids = resolver:FilterSpellIds(active_skills)
+    return resolver:BuildSpellItemsByIds(spell_ids)
+end
 -- ============================================================
 -- 静态查询接口 (转发SkillResolver)
 -- ============================================================

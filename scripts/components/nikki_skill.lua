@@ -12,7 +12,7 @@ local NikkiSkill = Class(function(self, inst)
         self.inst = inst
         self.max_range = 0
         self._active_skills = {}
-        self.skill_index_map = {}
+        self._skill_index_map = {}
         self._resolver = nil
         self._trigger_resolver = nil
         self._cooldowns = {}
@@ -88,7 +88,18 @@ function NikkiSkill:_SyncActiveSkillsToReplica()
 end
 
 function NikkiSkill:_UpdateSpellbookItems()
-    -- TODO: 实现更新逻辑
+    local resolver = self._resolver
+    if not resolver then
+        log.debug("[NikkiSkill Replica] No resolver set, cannot update spell items")
+        return
+    end
+    local active_skills = self:GetActiveSkills()
+    local spell_ids = resolver:FilterSpellIds(active_skills)
+    self._skill_index_map = {}
+    for index, skill_id in ipairs(spell_ids) do
+        self._skill_index_map[skill_id] = index
+    end
+    self.inst:PushEvent("nikki_spell_items_dirty")
 end
 
 function NikkiSkill:_UpdateSkillStatus()
@@ -198,15 +209,16 @@ function NikkiSkill:StartCooldown(skill_id, cd_time)
     end
 end
 
+-- ============================================================
+-- 动态查询接口
+-- ============================================================
+
 function NikkiSkill:GetSkillDef(id)
     if self._resolver then
         return self._resolver:GetDef(id)
     end
 end
 
--- ============================================================
--- 动态查询接口
--- ============================================================
 function NikkiSkill:IsAdded(skill_id)
     return self._active_skills[skill_id] == true -- O(1) 查询
 end
@@ -218,6 +230,21 @@ function NikkiSkill:GetActiveSkills()
         table.insert(list, skill_id)
     end
     return list
+end
+
+--- 提供根据 skill_id 查询对应 spell index 的接口
+function NikkiSkill:GetSkillSpellIndex(skill_id)
+    return self._skill_index_map and self._skill_index_map[skill_id]
+end
+
+--- 无参现调现算接口：获取整套当前的 spell items
+function NikkiSkill:GetSpellItems()
+    local resolver = self._resolver
+    if not resolver then return {} end
+
+    local active_skills = self:GetActiveSkills()
+    local spell_ids = resolver:FilterSpellIds(active_skills)
+    return resolver:BuildSpellItemsByIds(spell_ids)
 end
 
 -- ============================================================

@@ -24,12 +24,44 @@ local NikkiSkillCaster = Class(function(self, inst)
     self.inst = inst
     self._aiming_skill = nil
     self._is_aiming = false
+
+    self:Init()
 end)
+
+function NikkiSkillCaster:Init()
+    self:ExitAiming()
+    if TheWorld.ismastersim then
+        self.spell_caster = SpawnPrefab("nikki_spell_caster")
+        if self.spell_caster then
+            self.spell_caster:Attach(self.inst)
+            self.inst.spell_caster = self.spell_caster
+        end
+    end
+    self.inst:ListenForEvent("nikki_spell_items_dirty", function()
+        self:_RefreshSpell()
+    end)
+end
+
 
 function NikkiSkillCaster:OnRemoveFromEntity()
     self:ExitAiming()
 end
 
+function NikkiSkillCaster:_RefreshSpell()
+    local caster_inst = self.spell_caster or self.inst.spell_caster
+    if not caster_inst or not caster_inst.components.spellbook then
+        log.error("[NikkiSkillCaster _RefreshSpell] No spellbook component found on caster")
+        return
+    end
+    local skill_manager = GetSkillManager(self)
+    if not skill_manager then
+        log.error("[NikkiSkillCaster _RefreshSpell] No skill manager found for caster")
+        return
+    end
+    local items = skill_manager:GetSpellItems()
+    caster_inst.components.spellbook:SetItems(items)
+    log.debug("[NikkiSkillCaster _RefreshSpell] Spellbook items updated. Total: %d", #items)
+end
 -- ============================================================
 -- 瞄准状态管理 (Targeting)
 -- ============================================================
@@ -201,7 +233,15 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
             self:ToggleAiming(skill_id)
             return true
         elseif mode == "pos" then
-            -- TODO AOE / Reticule 网格瞄准逻辑
+            local spell_caster = self.spell_caster or self.inst.spell_caster
+            if not spell_caster or not spell_caster.components.aoetargeting then
+                log.error("[NikkiSkillCaster] No AOE targeting component found for skill '%s'", tostring(skill_id))
+                return false, "NO_AOE_TARGETING"
+            end
+            -- 装配
+
+            -- 进入AOE瞄准
+            spell_caster.components.aoetargeting:StartTargeting()
         end
     end
 
@@ -237,7 +277,7 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
 
     local act = self:BuildBufferedAction(target, pos, skill_id, is_client)
     log.debug("[NikkiSkillCaster] Built buffered action for skill '%s': %s, is_client=%s", tostring(skill_id),
-    tostring(act), tostring(is_client))
+        tostring(act), tostring(is_client))
     if not act then
         log.debug("[NikkiSkillCaster] Failed to build buffered action for skill '%s'", tostring(skill_id))
         return false, "BUILD_ACTION_FAILED"
