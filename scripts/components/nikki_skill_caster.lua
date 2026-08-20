@@ -38,6 +38,18 @@ function NikkiSkillCaster:Init()
         if self.spell_caster then
             self.spell_caster:Attach(self.inst)
             self.inst.spell_caster = self.spell_caster
+            self:_RefreshSpell()
+        end
+    else
+        -- 客机逻辑
+        -- 防止玩家重连等情况下，施法器比组件更早创建完毕
+        if self.inst.spell_caster ~= nil then
+            self:_RefreshSpell()
+        else
+            -- 监听子实体主动发来的就绪事件
+            self.inst:ListenForEvent("nikki_spell_caster_ready", function(inst, caster)
+                self:_RefreshSpell()
+            end)
         end
     end
     self.inst:ListenForEvent("nikki_spell_items_dirty", function()
