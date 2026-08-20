@@ -38,11 +38,8 @@ end)
 -- 预编译添加信息
 function SkillResolver:OnDefAdded(skill_id, def)
     def.priority = def.priority or 0
-    local has_wheel = def.wheel ~= nil
     local targeting_def = def.targeting
-    local is_pos_targeting = targeting_def and targeting_def.mode == "pos"
-    local is_spell_item = has_wheel or is_pos_targeting
-    def.is_spell_item = is_spell_item
+    def.is_spell = targeting_def and targeting_def.mode == "pos"
 
     -- Wheel 编译
     -- if type(def.wheel) == "table" and type(def.wheel.ui) == "table" then
@@ -136,16 +133,15 @@ function SkillResolver:GetTargetingDef(skill_id)
     return def and def.targeting or nil
 end
 
--- ============================================================
--- 3. 施法装配和查询
--- ============================================================
 
 --- 查询指定技能是否已编译轮盘配置
 function SkillResolver:IsSpellItem(skill_id)
     local def = self:GetDef(skill_id)
-    return def and def.is_spell_item == true or false
+    return def and def.is_spell == true or false
 end
-
+-- ============================================================
+-- 3. 施法装配和查询
+-- ============================================================
 --- 根据活跃技能列表过滤并提取可展示在轮盘/施法书中的技能 ID 列表
 ---@param skill_ids string[] 当前活跃技能 ID 数组
 ---@return string[] 适用于轮盘展示的技能 ID 列表
