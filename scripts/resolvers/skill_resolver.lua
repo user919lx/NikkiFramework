@@ -111,6 +111,7 @@ function SkillResolver:GetPriority(skill_id)
     local def = self:GetDef(skill_id)
     return def and def.priority or 0
 end
+
 --- 获取射程范围
 function SkillResolver:GetRange(skill_id)
     local def = self:GetDef(skill_id)
@@ -175,11 +176,64 @@ function SkillResolver:_BuildSpellItem(skill_id, order)
     }
     local def = self:GetDef(skill_id)
     if def then
+        local name = self:GetDisplayName(skill_id)
         item.ui = {
-            label = self:GetDisplayName(skill_id),
+            label = name,
         }
+        local targeting_def = def.targeting
+        local is_aoe_targeting = targeting_def and targeting_def.mode == "pos"
         item.onselect = function(spell_caster)
-            spell_caster.components.spellbook:SetSpellAction(nil)
+            if spell_caster.components.spellbook then
+                spell_caster.components.spellbook:SetSpellName(name)
+            end
+            if is_aoe_targeting then
+                local should_repeat_cast_fn = nil
+                if targeting_def.should_repeat_cast_fn then
+                    should_repeat_cast_fn = function(caster, doer)
+                        return targeting_def.should_repeat_cast_fn(doer)
+                    end
+                end
+                spell_caster.components.aoetargeting:SetAllowWater(targeting_def.allow_water or false)
+                spell_caster.components.aoetargeting:SetDeployRadius(targeting_def.deploy_radius)
+                spell_caster.components.aoetargeting:SetShouldRepeatCastFn(should_repeat_cast_fn)
+                local native_reticule = spell_caster.components.aoetargeting.reticule
+                if native_reticule then
+                    -- 设置默认值
+                    native_reticule.reticuleprefab = "reticuleaoe"
+                    native_reticule.pingprefab = "reticuleaoeping"
+                    native_reticule.targetfn = nil
+                    native_reticule.mousetargetfn = nil
+                    native_reticule.updatepositionfn = nil
+                    native_reticule.validcolour = { 1, .75, 0, 1 }
+                    native_reticule.invalidcolour = { .5, 0, 0, 1 }
+                    native_reticule.ease = true
+                    native_reticule.mouseenabled = true
+                    native_reticule.twinstickmode = 1
+                    native_reticule.twinstickrange = 8
+                    native_reticule.twinstickrange = 8
+
+                    if targeting_def.reticule then
+                        for k, v in pairs(targeting_def.reticule) do
+                            native_reticule[k] = v
+                        end
+                    end
+                end
+                if TheWorld.ismastersim then
+                    log.debug("[SkillResolver] Setting up AOE targeting for skill '%s' with targeting definition: %s", tostring(skill_id), tostring(targeting_def))
+                    spell_caster.components.aoetargeting:SetTargetFX(targeting_def.target_fx)
+                    spell_caster.components.spellbook:SetSpellFn(nil)
+                    spell_caster.components.aoespell:SetSpellFn(function(inst, doer, pt)
+                        log.debug("[SkillResolver] Executing skill '%s' at position %s", tostring(skill_id), tostring(pt))
+                        local caster_comp = doer.components.nikki_skill_caster
+                        if caster_comp then
+                            log.debug("[SkillResolver] Found caster component for doer '%s', executing skill.", tostring(doer))
+                            return caster_comp:Execute(skill_id, { pos = pt })
+                        end
+                        log.debug("[SkillResolver] No caster component found for doer '%s', cannot execute skill.", tostring(doer))
+                        return false, "NO_CASTER_COMP"
+                    end)
+                end
+            end
         end
     end
 

@@ -26,6 +26,9 @@ local NikkiSkillCaster = Class(function(self, inst)
     self._is_aiming = false
 
     self:Init()
+    inst:DoTaskInTime(1, function()
+        self:_RefreshSpell()
+    end)
 end)
 
 function NikkiSkillCaster:Init()
@@ -41,7 +44,6 @@ function NikkiSkillCaster:Init()
         self:_RefreshSpell()
     end)
 end
-
 
 function NikkiSkillCaster:OnRemoveFromEntity()
     self:ExitAiming()
@@ -62,6 +64,7 @@ function NikkiSkillCaster:_RefreshSpell()
     caster_inst.components.spellbook:SetItems(items)
     log.debug("[NikkiSkillCaster _RefreshSpell] Spellbook items updated. Total: %d", #items)
 end
+
 -- ============================================================
 -- 瞄准状态管理 (Targeting)
 -- ============================================================
@@ -234,14 +237,22 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
             return true
         elseif mode == "pos" then
             local spell_caster = self.spell_caster or self.inst.spell_caster
-            if not spell_caster or not spell_caster.components.aoetargeting then
-                log.error("[NikkiSkillCaster] No AOE targeting component found for skill '%s'", tostring(skill_id))
-                return false, "NO_AOE_TARGETING"
+            local spell_index = skill_manager:GetSkillSpellIndex(skill_id)
+            if not spell_caster then
+                log.debug("[NikkiSkillCaster] Cannot enter AOE targeting: spell_caster is nil for skill '%s'", tostring(skill_id))
+                return false, "NO_SPELL_CASTER"
             end
-            -- 装配
-
-            -- 进入AOE瞄准
-            spell_caster.components.aoetargeting:StartTargeting()
+            if not spell_index then
+                log.debug("[NikkiSkillCaster] Cannot enter AOE targeting: spell_index is nil for skill '%s'", tostring(skill_id))
+                return false, "NO_SPELL_INDEX"
+            end
+            if spell_caster and spell_caster.components.spellbook then
+                if spell_caster.components.spellbook:SelectSpell(spell_index) then
+                    log.debug("[NikkiSkillCaster] Selected spell '%s' for AOE targeting", tostring(skill_id))
+                    self.inst.components.playercontroller:StartAOETargetingUsing(spell_caster)
+                    return true
+                end
+            end
         end
     end
 
@@ -294,11 +305,9 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
 end
 
 -- ============================================================
--- [仅服务端] 统一最终结算
+-- 统一最终结算
 -- ============================================================
 function NikkiSkillCaster:Execute(skill_id, params)
-    if not TheWorld.ismastersim then return false end
-
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return false, "NO_MANAGER" end
 
