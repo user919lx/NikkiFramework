@@ -33,6 +33,37 @@ AddModRPCHandler("NikkiFramework", "TryExecuteSkill", function(player, skill_id,
     skill_comp:TryExecute(skill_id, { target = target, pos = pos , is_rpc = true})
 end)
 
+local function HookCastAOEHandler(sg)
+    -- 获取当前的 CASTAOE actionhandler[cite: 5, 6, 7]
+    local old_handler = sg.actionhandlers[GLOBAL.ACTIONS.CASTAOE]
+    if old_handler ~= nil then
+        local old_deststate = old_handler.deststate
+        -- 重写 deststate 函数
+        old_handler.deststate = function(inst, action)
+            local invobject = action.invobject
+            local nikki_aoe_state = invobject and invobject.prefab == "nikki_spell_caster" and invobject._nikki_aoe_state
+            if nikki_aoe_state ~= nil then
+                -- 如果是函数则执行，如果是字符串则直接返回
+                if type(nikki_aoe_state) == "function" then
+                    local custom_state = nikki_aoe_state(inst, action)
+                    if custom_state ~= nil then
+                        return custom_state
+                    end
+                else
+                    return nikki_aoe_state
+                end
+            end
+            -- 如果没有设置自定义状态，维持原版/其他模组的逻辑[cite: 5, 6, 7]
+            if old_deststate ~= nil then
+                return old_deststate(inst, action)
+            end
+        end
+    end
+end
+
+-- 同时为主机（wilson）和客机预测端（wilson_client）注册 Hook[cite: 5, 6]
+AddStategraphPostInit("wilson", HookCastAOEHandler)
+AddStategraphPostInit("wilson_client", HookCastAOEHandler)
 
 
 if not GLOBAL.TheNet:IsDedicated() then
