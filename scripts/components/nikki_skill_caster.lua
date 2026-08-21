@@ -3,20 +3,16 @@ local log = require("utils/log")
 local ResourceAdapter = require("utils/resource_adapter")
 
 local function GetSkillManager(self)
-    if self == nil or self.inst == nil then
-        return nil
-    end
+    if self == nil or self.inst == nil then return nil end
     return self.inst.components.nikki_skill or self.inst.replica.nikki_skill
 end
 
--- 无状态Component Server/Client 通用
 local NikkiSkillCaster = Class(function(self, inst)
     self.inst = inst
-
+    self.is_wheel_open = false
+    self._spell_index_map = {}
+    self._wheel_items = {}
     self:Init()
-    inst:DoTaskInTime(1, function()
-        self:_RefreshSpell()
-    end)
 end)
 
 function NikkiSkillCaster:Init()
@@ -28,37 +24,90 @@ function NikkiSkillCaster:Init()
             self:_RefreshSpell()
         end
     else
-        -- 客机逻辑
-        -- 防止玩家重连等情况下，施法器比组件更早创建完毕
         if self.inst.spell_caster ~= nil then
             self:_RefreshSpell()
         else
-            -- 监听子实体主动发来的就绪事件
-            self.inst:ListenForEvent("nikki_spell_caster_ready", function(inst, caster)
+            local callback
+            callback = function(inst, caster)
+                self.inst:RemoveEventListener("nikki_spell_caster_ready", callback)
                 self:_RefreshSpell()
-            end)
+            end
+            self.inst:ListenForEvent("nikki_spell_caster_ready", callback)
         end
     end
-    self.inst:ListenForEvent("nikki_spell_items_dirty", function()
+    self.inst:ListenForEvent("nikki_active_skills_dirty", function()
         self:_RefreshSpell()
+        self:_RefreshWheel()
+    end)
+    self.inst:ListenForEvent("nikki_state_dirty", function()
+        if self.inst.components.playercontroller ~= nil then
+            self.inst.components.playercontroller:CancelAOETargeting()
+        end
+        self:CloseWheel()
+    end)
+    self.inst:DoTaskInTime(1, function()
+        self:_RefreshSpell()
+        self:_RefreshWheel()
     end)
 end
 
+-- ============================================================
+-- 轮盘与界面状态控制
+-- ============================================================
+
+function NikkiSkillCaster:CloseWheel()
+    self.is_wheel_open = false
+    -- TODO: 在这里补充调用 HUD 关闭轮盘 UI 的具体逻辑
+    -- 例如: if ThePlayer and ThePlayer.HUD then ThePlayer.HUD:CloseSkillWheel() end
+end
+
+function NikkiSkillCaster:OpenWheel()
+    -- 开启前必须强制取消当前瞄准状态
+    if self.inst.components.playercontroller ~= nil then
+        self.inst.components.playercontroller:CancelAOETargeting()
+    end
+
+    self.is_wheel_open = true
+
+    -- TODO: 在这里补充调用 HUD 打开轮盘 UI 的具体逻辑，传入 self._wheel_items
+    -- 例如: if ThePlayer and ThePlayer.HUD then ThePlayer.HUD:OpenSkillWheel(self._wheel_items) end
+end
+
+function NikkiSkillCaster:GetWheelItems()
+    return self._wheel_items
+end
+
+-- ============================================================
+-- 独立刷新逻辑：AOE Spell 与 Wheel Items 分离
+-- ============================================================
 
 function NikkiSkillCaster:_RefreshSpell()
-    local caster_inst = self.spell_caster or self.inst.spell_caster
-    if not caster_inst or not caster_inst.components.spellbook then
-        log.error("[NikkiSkillCaster _RefreshSpell] No spellbook component found on caster")
-        return
-    end
     local skill_manager = GetSkillManager(self)
-    if not skill_manager then
-        log.error("[NikkiSkillCaster _RefreshSpell] No skill manager found for caster")
-        return
+    if not skill_manager then return end
+    local resolver = skill_manager._resolver
+    if not resolver or not resolver.BuildSpellItemsByIds then return end
+    local active_skills = skill_manager:GetActiveSkills()
+    local spell_items, index_map = resolver:BuildSpellItemsByIds(active_skills)
+    self._spell_index_map = index_map
+    local caster_inst = self.spell_caster or self.inst.spell_caster
+    if caster_inst and caster_inst.components.spellbook then
+        caster_inst.components.spellbook:SetItems(spell_items)
     end
-    local items = skill_manager:GetSpellItems()
-    caster_inst.components.spellbook:SetItems(items)
-    log.debug("[NikkiSkillCaster _RefreshSpell] Spellbook items updated. Total: %d", #items)
+    log.debug("[NikkiSkillCaster _RefreshSpell] Spell items updated: %d", #spell_items)
+end
+
+function NikkiSkillCaster:_RefreshWheel()
+    local skill_manager = GetSkillManager(self)
+    if not skill_manager then return end
+    local resolver = skill_manager._resolver
+    if not resolver then return end
+    local active_skills = skill_manager:GetActiveSkills()
+    if resolver.BuildWheelItemsByIds then
+        self._wheel_items = resolver:BuildWheelItemsByIds(active_skills)
+    else
+        self._wheel_items = {}
+    end
+    log.debug("[NikkiSkillCaster _RefreshWheel] Wheel items updated: %d", #self._wheel_items)
 end
 
 -- ============================================================
@@ -97,10 +146,8 @@ function NikkiSkillCaster:BuildBufferedAction(target, pos, skill_id, is_client)
     return act
 end
 
-
 function NikkiSkillCaster:GetAvailableSkillAction(target, pos, right)
     if not self.inst or not self.inst:IsValid() then return nil end
-
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return nil end
 
@@ -146,15 +193,17 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
         log.debug("[NikkiSkillCaster] Skill definition not found for skill '%s'", tostring(skill_id))
         return false, "SKILL_DEF_NOT_FOUND"
     end
+
     local is_rpc = params and params.is_rpc
     local is_client = not TheWorld.ismastersim
-    -- 只有非 RPC 发起（即玩家本地交互） 且技能定义为 AOE 的情况下，才会进入瞄准模式
+
     if def.is_aoe and not is_rpc then
         local spell_caster = self.spell_caster or self.inst.spell_caster
-        local spell_index = skill_manager:GetSkillSpellIndex(skill_id)
+        local spell_index = self._spell_index_map[skill_id]
         if spell_index and spell_caster and spell_caster.components.spellbook then
             if spell_caster.components.spellbook:SelectSpell(spell_index) then
-                log.debug("[NikkiSkillCaster] Entering AOE targeting mode for skill '%s' (spell index: %d)", tostring(skill_id), spell_index)
+                log.debug("[NikkiSkillCaster] Entering AOE targeting mode for skill '%s' (spell index: %d)",
+                    tostring(skill_id), spell_index)
                 pc:StartAOETargetingUsing(spell_caster)
                 return true
             end
@@ -184,8 +233,6 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
             target = action_def.fallback.target(self.inst, params, def)
         end
         if not target or not target:IsValid() then
-            log.debug("[NikkiSkillCaster] Missing or invalid target for skill '%s' with invoke type 'target'",
-                tostring(skill_id))
             return false, "MISSING_OR_INVALID_TARGET"
         end
     elseif invoke == "pos" then
@@ -193,18 +240,15 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
             pos = action_def.fallback.pos(self.inst, params, def)
         end
         if not pos then
-            log.debug("[NikkiSkillCaster] Missing position for skill '%s' with invoke type 'pos'", tostring(skill_id))
             return false, "MISSING_POS"
         end
     end
 
     local act = self:BuildBufferedAction(target, pos, skill_id, is_client)
-    log.debug("[NikkiSkillCaster] Built buffered action for skill '%s': %s, is_client=%s", tostring(skill_id),
-        tostring(act), tostring(is_client))
     if not act then
-        log.debug("[NikkiSkillCaster] Failed to build buffered action for skill '%s'", tostring(skill_id))
         return false, "BUILD_ACTION_FAILED"
     end
+
     if pc then
         pc:DoAction(act)
         return true

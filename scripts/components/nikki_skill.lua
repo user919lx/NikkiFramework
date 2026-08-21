@@ -12,15 +12,13 @@ local NikkiSkill = Class(function(self, inst)
         self.inst = inst
         self.max_range = 0
         self._active_skills = {}
-        self._skill_index_map = {}
         self._resolver = nil
         self._trigger_resolver = nil
         self._cooldowns = {}
     end,
     nil,
-    {
-        max_range = on_max_range
-    })
+    { max_range = on_max_range })
+
 -- ============================================================
 -- 生命周期管理
 -- ============================================================
@@ -28,10 +26,9 @@ function NikkiSkill:_OnSkillAdd(skill_id)
     local resolver = self._resolver
     local def = resolver and resolver:GetDef(skill_id)
     if not def then return end
+
     if def.tags then
-        for _, tag in ipairs(def.tags) do
-            self.inst:AddTag(tag)
-        end
+        for _, tag in ipairs(def.tags) do self.inst:AddTag(tag) end
     end
     if def.effects then
         for _, effect_id in ipairs(def.effects) do
@@ -40,7 +37,6 @@ function NikkiSkill:_OnSkillAdd(skill_id)
             end
         end
     end
-
     if type(def.on_add) == "function" then
         pcall(def.on_add, self.inst, def)
     end
@@ -50,10 +46,9 @@ function NikkiSkill:_OnSkillRemove(skill_id)
     local resolver = self._resolver
     local def = resolver and resolver:GetDef(skill_id)
     if not def then return end
+
     if def.tags then
-        for _, tag in ipairs(def.tags) do
-            self.inst:RemoveTag(tag)
-        end
+        for _, tag in ipairs(def.tags) do self.inst:RemoveTag(tag) end
     end
     if def.effects then
         for _, effect_id in ipairs(def.effects) do
@@ -69,7 +64,7 @@ end
 
 function NikkiSkill:_UpdateRangeRadius()
     local max_range = 0
-    local active_skills = self:GetActiveSkills() -- 获取当前所有激活技能的列表
+    local active_skills = self:GetActiveSkills()
     for _, skill_id in ipairs(active_skills) do
         local range = self:GetSkillRange(skill_id)
         if range and type(range) == "number" and range > max_range then
@@ -87,37 +82,24 @@ function NikkiSkill:_SyncActiveSkillsToReplica()
     end
 end
 
-function NikkiSkill:_UpdateSpellbookItems()
-    local resolver = self._resolver
-    if not resolver then
-        log.debug("[NikkiSkill Replica] No resolver set, cannot update spell items")
-        return
-    end
-    local active_skills = self:GetActiveSkills()
-    local spell_ids = resolver:FilterSpellIds(active_skills)
-    self._skill_index_map = {}
-    for index, skill_id in ipairs(spell_ids) do
-        self._skill_index_map[skill_id] = index
-    end
-    self.inst:PushEvent("nikki_spell_items_dirty")
-end
-
 function NikkiSkill:_UpdateSkillStatus()
     self:_UpdateRangeRadius()
     self:_SyncActiveSkillsToReplica()
-    self:_UpdateSpellbookItems()
+    -- 服务端也派发一份事件，供主机的 Caster 捕获
+    self.inst:PushEvent("nikki_active_skills_dirty")
 end
 
 function NikkiSkill:_AddSkillsInternal(ids)
     if not ids then return end
     local resolver = self._resolver
     local trigger_resolver = self._trigger_resolver
+
     for _, id in ipairs(ids) do
-        -- 字典查重，O(1) 复杂度，绝不重复
         if not self:IsAdded(id) then
             self:_OnSkillAdd(id)
-            self._active_skills[id] = true -- 写入字典
+            self._active_skills[id] = true
             log.debug("[NikkiSkill] Added skill '%s' to %s.", tostring(id), tostring(self.inst))
+
             if trigger_resolver then
                 local triggers = trigger_resolver:GetTriggers(id)
                 if triggers and next(triggers) then
@@ -165,7 +147,7 @@ function NikkiSkill:_RemoveSkillsInternal(ids)
                 end
             end
             self:_OnSkillRemove(id)
-            self._active_skills[id] = nil -- O(1) 复杂度直接删除
+            self._active_skills[id] = nil
             self._cooldowns[id] = nil
         end
     end
@@ -212,19 +194,15 @@ end
 -- ============================================================
 -- 动态查询接口
 -- ============================================================
-
 function NikkiSkill:GetSkillDef(id)
-    if self._resolver then
-        return self._resolver:GetDef(id)
-    end
+    if self._resolver then return self._resolver:GetDef(id) end
 end
 
 function NikkiSkill:IsAdded(skill_id)
-    return self._active_skills[skill_id] == true -- O(1) 查询
+    return self._active_skills[skill_id] == true
 end
 
 function NikkiSkill:GetActiveSkills()
-    -- 将底层的字典动态打包成 Array 返回，满足 ipairs 遍历
     local list = {}
     for skill_id, _ in pairs(self._active_skills) do
         table.insert(list, skill_id)
@@ -232,46 +210,23 @@ function NikkiSkill:GetActiveSkills()
     return list
 end
 
---- 提供根据 skill_id 查询对应 spell index 的接口
-function NikkiSkill:GetSkillSpellIndex(skill_id)
-    return self._skill_index_map and self._skill_index_map[skill_id]
-end
-
---- 无参现调现算接口：获取整套当前的 spell items
-function NikkiSkill:GetSpellItems()
-    local resolver = self._resolver
-    if not resolver then return {} end
-
-    local active_skills = self:GetActiveSkills()
-    local spell_ids = resolver:FilterSpellIds(active_skills)
-    return resolver:BuildSpellItemsByIds(spell_ids)
-end
-
 -- ============================================================
 -- 静态查询接口 (转发SkillResolver)
 -- ============================================================
 function NikkiSkill:GetSkillActionDef(id)
-    if self._resolver then
-        return self._resolver:GetActionDef(id)
-    end
+    if self._resolver then return self._resolver:GetActionDef(id) end
 end
 
 function NikkiSkill:GetSkillTargetingDef(id)
-    if self._resolver then
-        return self._resolver:GetTargetingDef(id)
-    end
+    if self._resolver then return self._resolver:GetTargetingDef(id) end
 end
 
 function NikkiSkill:GetSkillRange(id)
-    if self._resolver then
-        return self._resolver:GetRange(id)
-    end
+    if self._resolver then return self._resolver:GetRange(id) end
 end
 
 function NikkiSkill:GetSkillName(id)
-    if self._resolver then
-        return self._resolver:GetDisplayName(id)
-    end
+    if self._resolver then return self._resolver:GetDisplayName(id) end
 end
 
 return NikkiSkill

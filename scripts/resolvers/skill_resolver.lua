@@ -197,30 +197,6 @@ end
 -- ============================================================
 -- 3. 施法装配
 -- ============================================================
---- 根据活跃技能列表过滤并提取可展示在轮盘/施法书中的技能 ID 列表
----@param skill_ids string[] 当前活跃技能 ID 数组
----@return string[] 适用于轮盘展示的技能 ID 列表
-function SkillResolver:FilterSpellIds(skill_ids)
-    if not skill_ids or #skill_ids == 0 then
-        return {}
-    end
-    local valid_items = {}
-    for _, skill_id in ipairs(skill_ids) do
-        if self:IsSpellItem(skill_id) then
-            table.insert(valid_items, skill_id)
-        end
-    end
-    table.sort(valid_items, function(a, b)
-        local pa = self:GetPriority(a)
-        local pb = self:GetPriority(b)
-        if pa == pb then
-            return a < b
-        end
-        return pa > pb
-    end)
-    return valid_items
-end
-
 --- 构建供 Spell 使用的数据条目
 --- @param skill_id string 技能 ID
 --- @return table item 供 spellbook组件 使用的条目
@@ -279,21 +255,41 @@ function SkillResolver:_BuildSpellItem(skill_id)
     return item
 end
 
---- 批量构建供 spellbook组件 使用的 Items 数组（保持原数组顺序）
----@param skill_ids string[] 有序技能 ID 列表
----@return table[] items  用于spellbook组件 SetItems的数组
+--- 批量过滤、排序并构建供 spellbook 组件使用的 Items 数组及对应 Index Map
+---@param skill_ids string[] 当前所有活跃技能 ID 列表
+---@return table[] items 用于 spellbook 组件 SetItems 的数组
+---@return table<string, number> index_map 技能 ID 映射到 Spellbook 序号的字典
 function SkillResolver:BuildSpellItemsByIds(skill_ids)
     if not skill_ids or #skill_ids == 0 then
-        return {}
+        return {}, {}
     end
+    -- 1. 过滤出合法 Spell 技能
+    local valid_ids = {}
+    for _, skill_id in ipairs(skill_ids) do
+        if self:IsSpellItem(skill_id) then
+            table.insert(valid_ids, skill_id)
+        end
+    end
+    -- 2. 排序
+    table.sort(valid_ids, function(a, b)
+        local pa = self:GetPriority(a)
+        local pb = self:GetPriority(b)
+        if pa == pb then
+            return a < b
+        end
+        return pa > pb
+    end)
+    -- 3. 构建 Items 与 Index 映射表
     local items = {}
-    for order, skill_id in ipairs(skill_ids) do
+    local index_map = {}
+    for order, skill_id in ipairs(valid_ids) do
         local item = self:_BuildSpellItem(skill_id)
         if item then
             table.insert(items, item)
+            index_map[skill_id] = #items -- 以实际插入的有效 item 下标为准
         end
     end
-    return items
+    return items, index_map
 end
 
 return SkillResolver

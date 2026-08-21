@@ -8,7 +8,6 @@ local NikkiSkill = Class(function(self, inst)
 
     self._active_skills_str = net_string(inst.GUID, "skill._active_skills_str", "skill_activeskillsdirty")
     self._active_skills_cache = {}
-    self._skill_index_map = {}
 
     self._resolver = inst._replica_skill_resolver
     inst._replica_skill_resolver = nil
@@ -24,35 +23,17 @@ local NikkiSkill = Class(function(self, inst)
             for id in string.gmatch(str or "", "[^,]+") do
                 self._active_skills_cache[id] = true
             end
-            self:_UpdateSpellbookItems()
+
             log.debug("[NikkiSkill Replica] Updated active skills cache: %s", str)
+            -- 状态改变，直接向外派发脏标记事件
+            self.inst:PushEvent("nikki_active_skills_dirty")
         end)
     end
 end)
 
-
--- ============================================================
--- 数据同步 (Client)
--- ============================================================
-function NikkiSkill:_UpdateSpellbookItems()
-    local resolver = self._resolver
-    if not resolver then
-        log.debug("[NikkiSkill Replica] No resolver set, cannot update spell items")
-        return
-    end
-    local active_skills = self:GetActiveSkills()
-    local spell_ids = resolver:FilterSpellIds(active_skills)
-    self._skill_index_map = {}
-    for index, skill_id in ipairs(spell_ids) do
-        self._skill_index_map[skill_id] = index
-    end
-    self.inst:PushEvent("nikki_spell_items_dirty")
-end
-
 -- ============================================================
 -- 数据同步 (Server)
 -- ============================================================
-
 function NikkiSkill:SetMaxRange(range)
     self._max_range:set(range or 0)
 end
@@ -60,7 +41,7 @@ end
 function NikkiSkill:SyncActiveSkills()
     local comp = self.inst.components.nikki_skill
     if not comp then return end
-    -- 把服务端的字典 keys 拼成字符串同步到客户端
+
     local keys = {}
     for k, _ in pairs(comp._active_skills) do
         table.insert(keys, k)
@@ -93,48 +74,27 @@ function NikkiSkill:GetMaxRange()
     end
 end
 
-function NikkiSkill:GetSkillSpellIndex(skill_id)
-    return self._skill_index_map and self._skill_index_map[skill_id]
-end
-
-function NikkiSkill:GetSpellItems()
-    local resolver = self._resolver
-    if not resolver then return {} end
-    local active_skills = self:GetActiveSkills()
-    local spell_ids = resolver:FilterSpellIds(active_skills)
-    return resolver:BuildSpellItemsByIds(spell_ids)
-end
 -- ============================================================
 -- 静态查询接口 (转发SkillResolver)
 -- ============================================================
 function NikkiSkill:GetSkillDef(id)
-    if self._resolver then
-        return self._resolver:GetDef(id)
-    end
+    if self._resolver then return self._resolver:GetDef(id) end
 end
 
 function NikkiSkill:GetSkillActionDef(id)
-    if self._resolver then
-        return self._resolver:GetActionDef(id)
-    end
+    if self._resolver then return self._resolver:GetActionDef(id) end
 end
 
 function NikkiSkill:GetSkillTargetingDef(id)
-    if self._resolver then
-        return self._resolver:GetTargetingDef(id)
-    end
+    if self._resolver then return self._resolver:GetTargetingDef(id) end
 end
 
 function NikkiSkill:GetSkillRange(id)
-    if self._resolver then
-        return self._resolver:GetRange(id)
-    end
+    if self._resolver then return self._resolver:GetRange(id) end
 end
 
 function NikkiSkill:GetSkillName(id)
-    if self._resolver then
-        return self._resolver:GetDisplayName(id)
-    end
+    if self._resolver then return self._resolver:GetDisplayName(id) end
 end
 
 return NikkiSkill
