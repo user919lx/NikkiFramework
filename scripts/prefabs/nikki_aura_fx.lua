@@ -46,7 +46,7 @@ end
 -- 快捷应用整个 def.aura 配置
 local function ApplyAuraDef(inst, aura_def)
     if not aura_def then return end
-    
+
     if aura_def.radius then
         inst:SetRange(aura_def.radius)
     end
@@ -61,13 +61,13 @@ local function fn()
     inst.entity:AddTransform()
     inst.entity:AddAnimState()
     inst.entity:AddFollower()
+    inst.entity:AddNetwork()
 
     inst.Transform:SetNoFaced()
 
     inst.entity:SetCanSleep(false)
     inst.persists = false
 
-    inst:AddTag("CLASSIFIED")
     inst:AddTag("NOCLICK")
     inst:AddTag("FX")
 
@@ -76,8 +76,8 @@ local function fn()
     inst.AnimState:PlayAnimation("idle", true)
 
     inst.AnimState:SetOrientation(ANIM_ORIENTATION.OnGround)
-    inst.AnimState:SetLayer(LAYER_BACKGROUND)
-    inst.AnimState:SetSortOrder(1)
+    inst.AnimState:SetLayer(LAYER_WORLD_BACKGROUND)
+    inst.AnimState:SetSortOrder(3)
 
     inst.AnimState:SetDefaultEffectHandle(resolvefilepath("shaders/default_aura.ksh"))
 
