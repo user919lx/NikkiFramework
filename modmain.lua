@@ -83,6 +83,9 @@ AddComponentPostInit("reticule", function(self)
             elseif inst.SetRadius ~= nil and self.radius ~= nil then
                 inst:SetRadius(self.radius)
             end
+            if inst.SetSearchFn ~= nil then
+                inst:SetSearchFn(self.search_fn)
+            end
         end
     end
 
@@ -93,6 +96,7 @@ AddComponentPostInit("reticule", function(self)
         self.shape = nil
         self.shape_param = nil
         self.radius = nil
+        self.search_fn = nil
 
         config = config or {}
         for k, v in pairs(config) do
@@ -100,7 +104,6 @@ AddComponentPostInit("reticule", function(self)
         end
 
         self:_ApplyParamsToEntity(self.reticule)
-        -- 确保颜色配置更新后即时刷新
         if self.reticule ~= nil and self.UpdateColour ~= nil then
             self:UpdateColour()
         end
