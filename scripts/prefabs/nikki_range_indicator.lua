@@ -36,11 +36,13 @@ local function UpdateVisibility(inst)
     if inst._override_active then
         should_show = inst._override_range and inst._override_range > 0
         display_range = inst._override_range or 0
-        log.debug("[Nikki Range Indicator] Override mode active: should_show=%s, display_range=%s", tostring(should_show), display_range)
+        log.debug("[Nikki Range Indicator] Override mode active: should_show=%s, display_range=%s", tostring(should_show),
+            display_range)
     else
         should_show = inst._is_toggled_on and inst._range > 0
         display_range = inst._range
-        log.debug("[Nikki Range Indicator] Normal mode: should_show=%s, display_range=%s", tostring(should_show), display_range)
+        log.debug("[Nikki Range Indicator] Normal mode: should_show=%s, display_range=%s", tostring(should_show),
+            display_range)
     end
 
     if should_show then
@@ -129,20 +131,17 @@ local function fn()
     inst.entity:SetCanSleep(false)
     inst.persists = false
 
-    inst:AddTag("CLASSIFIED")
     inst:AddTag("NOCLICK")
     inst:AddTag("FX")
-    inst:AddTag("placer")
 
     inst.AnimState:SetBank("firefighter_placement")
     inst.AnimState:SetBuild("firefighter_placement")
     inst.AnimState:PlayAnimation("idle", true)
-    inst.AnimState:SetLightOverride(1)
     inst.AnimState:SetOrientation(ANIM_ORIENTATION.OnGround)
-    inst.AnimState:SetLayer(LAYER_BACKGROUND)
-    inst.AnimState:SetSortOrder(1)
-    inst.AnimState:SetAddColour(.5, .1, .2, 0)
-
+    inst.AnimState:SetLayer(LAYER_WORLD_BACKGROUND)
+    inst.AnimState:SetSortOrder(3)
+    inst.AnimState:SetMultColour(1, .75, 0, 1)
+    inst.AnimState:SetBloomEffectHandle("shaders/anim.ksh")
     inst:Hide()
 
     inst.owner = nil

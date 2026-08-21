@@ -9,6 +9,7 @@ PrefabFiles = {
     "nikki_spell_caster",
     "nikki_range_indicator",
     "nikki_aura_fx",
+    "nikki_reticule"
 }
 AddReplicableComponent("nikki_skill_trigger")
 AddReplicableComponent("nikki_state")
@@ -30,9 +31,10 @@ AddModRPCHandler("NikkiFramework", "TryExecuteSkill", function(player, skill_id,
     if x and z then
         pos = GLOBAL.Vector3(x, 0, z)
     end
-    skill_comp:TryExecute(skill_id, { target = target, pos = pos , is_rpc = true})
+    skill_comp:TryExecute(skill_id, { target = target, pos = pos, is_rpc = true })
 end)
 
+-- 实现 瞄准Mode=pos的任意action state转换
 local function HookCastAOEHandler(sg)
     -- 获取当前的 CASTAOE actionhandler[cite: 5, 6, 7]
     local old_handler = sg.actionhandlers[GLOBAL.ACTIONS.CASTAOE]
@@ -60,12 +62,94 @@ local function HookCastAOEHandler(sg)
         end
     end
 end
-
 -- 同时为主机（wilson）和客机预测端（wilson_client）注册 Hook[cite: 5, 6]
 AddStategraphPostInit("wilson", HookCastAOEHandler)
 AddStategraphPostInit("wilson_client", HookCastAOEHandler)
 
+AddComponentPostInit("aoetargeting", function(self)
+    function self:SetReticule(reticule)
+        self.reticule = reticule or {}
+        if self.inst.components.reticule ~= nil then
+            self.inst.components.reticule:SetConfig(self.reticule)
+        end
+    end
+end)
+AddComponentPostInit("reticule", function(self)
+    function self:_ApplyParamsToEntity(inst)
+        if inst ~= nil then
+            inst.AnimState:ClearBloomEffectHandle()
+            if inst.SetShape ~= nil then
+                inst:SetShape(self.shape or "CIRCLE", self.radius, self.shape_param)
+            elseif inst.SetRadius ~= nil and self.radius ~= nil then
+                inst:SetRadius(self.radius)
+            end
+        end
+    end
 
+    function self:SetConfig(config)
+        self.targetfn = nil
+        self.mousetargetfn = nil
+        self.updatepositionfn = nil
+        self.shape = nil
+        self.shape_param = nil
+        self.radius = nil
+
+        config = config or {}
+        for k, v in pairs(config) do
+            self[k] = v
+        end
+
+        self:_ApplyParamsToEntity(self.reticule)
+        -- 确保颜色配置更新后即时刷新
+        if self.reticule ~= nil and self.UpdateColour ~= nil then
+            self:UpdateColour()
+        end
+    end
+
+    local _CreateReticule = self.CreateReticule
+    function self:CreateReticule(...)
+        _CreateReticule(self, ...)
+        self:_ApplyParamsToEntity(self.reticule)
+    end
+
+    local _PingReticuleAt = self.PingReticuleAt
+    function self:PingReticuleAt(pos)
+        local old_SpawnPrefab = GLOBAL.SpawnPrefab
+        GLOBAL.SpawnPrefab = function(prefab, ...)
+            local inst = old_SpawnPrefab(prefab, ...)
+            self:_ApplyParamsToEntity(inst)
+            return inst
+        end
+        local ok, err = GLOBAL.pcall(_PingReticuleAt, self, pos)
+        GLOBAL.SpawnPrefab = old_SpawnPrefab
+        if not ok then
+            GLOBAL.error(err)
+        end
+    end
+
+    local _UpdatePosition = self.UpdatePosition
+    function self:UpdatePosition(dt)
+        _UpdatePosition(self, dt)
+        if self.reticule ~= nil and self.reticule.prefab == "nikki_reticule" then
+            self.reticule.AnimState:ClearBloomEffectHandle()
+        end
+    end
+end)
+-- local function MakeReticuleRadiusSetter(base_radius)
+--     return function(inst)
+--         inst._base_radius = base_radius
+--         inst.SetRadius = function(self, radius)
+--             local scale = math.sqrt(radius / self._base_radius)
+--             self.Transform:SetScale(scale, scale, scale)
+--         end
+--     end
+-- end
+-- local RETICULE_CONFIGS = {
+--     { prefab = "reticuleaoe", base_radius = 4 },
+-- }
+-- for _, cfg in ipairs(RETICULE_CONFIGS) do
+--     AddPrefabPostInit(cfg.prefab, MakeReticuleRadiusSetter(cfg.base_radius))
+-- end
 if not GLOBAL.TheNet:IsDedicated() then
     GLOBAL.TheInput:AddKeyHandler(function(key, down)
         if not down then return end

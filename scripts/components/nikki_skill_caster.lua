@@ -9,21 +9,9 @@ local function GetSkillManager(self)
     return self.inst.components.nikki_skill or self.inst.replica.nikki_skill
 end
 
-local function GetRangeIndicator(inst)
-    if inst.range_indicator then
-        return inst.range_indicator
-    end
-    local indicator = SpawnPrefab("nikki_range_indicator")
-    indicator:SetOwner(inst)
-    inst.range_indicator = indicator
-    return indicator
-end
-
 -- 无状态Component Server/Client 通用
 local NikkiSkillCaster = Class(function(self, inst)
     self.inst = inst
-    self._aiming_skill = nil
-    self._is_aiming = false
 
     self:Init()
     inst:DoTaskInTime(1, function()
@@ -32,7 +20,6 @@ local NikkiSkillCaster = Class(function(self, inst)
 end)
 
 function NikkiSkillCaster:Init()
-    self:ExitAiming()
     if TheWorld.ismastersim then
         self.spell_caster = SpawnPrefab("nikki_spell_caster")
         if self.spell_caster then
@@ -57,9 +44,6 @@ function NikkiSkillCaster:Init()
     end)
 end
 
-function NikkiSkillCaster:OnRemoveFromEntity()
-    self:ExitAiming()
-end
 
 function NikkiSkillCaster:_RefreshSpell()
     local caster_inst = self.spell_caster or self.inst.spell_caster
@@ -75,53 +59,6 @@ function NikkiSkillCaster:_RefreshSpell()
     local items = skill_manager:GetSpellItems()
     caster_inst.components.spellbook:SetItems(items)
     log.debug("[NikkiSkillCaster _RefreshSpell] Spellbook items updated. Total: %d", #items)
-end
-
--- ============================================================
--- 瞄准状态管理 (Targeting)
--- ============================================================
-function NikkiSkillCaster:EnterAiming(skill_id)
-    self._aiming_skill = skill_id
-    self._is_aiming = true
-    log.debug("[NikkiSkillCaster] Enter aiming for skill: %s", tostring(skill_id))
-
-    local skill_manager = GetSkillManager(self)
-    if skill_manager then
-        local range = skill_manager:GetSkillRange(skill_id)
-        local indicator = GetRangeIndicator(self.inst)
-        if indicator and range and range > 0 then
-            indicator:EnterOverride(range)
-        end
-    end
-end
-
-function NikkiSkillCaster:ExitAiming()
-    self._aiming_skill = nil
-    self._is_aiming = false
-    log.debug("[NikkiSkillCaster] Exit aiming")
-
-    local indicator = GetRangeIndicator(self.inst)
-    if indicator then
-        indicator:ExitOverride()
-    end
-end
-
-function NikkiSkillCaster:ToggleAiming(skill_id)
-    if self:IsAiming() and self._aiming_skill == skill_id then
-        self:ExitAiming()
-        return false
-    else
-        self:EnterAiming(skill_id)
-        return true
-    end
-end
-
-function NikkiSkillCaster:IsAiming()
-    return self._is_aiming and self._aiming_skill ~= nil
-end
-
-function NikkiSkillCaster:GetAimingSkill()
-    return self._aiming_skill
 end
 
 -- ============================================================
@@ -160,35 +97,6 @@ function NikkiSkillCaster:BuildBufferedAction(target, pos, skill_id, is_client)
     return act
 end
 
--- 专门用于构建 Target 瞄准动作的入口 (所有校验与获取收归内部)
-function NikkiSkillCaster:BuildTargetAimAction(target)
-    if not target or not target:IsValid() then
-        return nil
-    end
-
-    local skill_id = self:GetAimingSkill()
-    if not skill_id then
-        return nil
-    end
-
-    local skill_manager = GetSkillManager(self)
-    if not skill_manager then
-        return nil
-    end
-
-    -- 强制校验：必须具备 targeting 定义且必须提供 testfn 校验函数
-    local targeting_def = skill_manager.GetSkillTargetingDef and skill_manager:GetSkillTargetingDef(skill_id)
-    if not targeting_def or type(targeting_def.testfn) ~= "function" then
-        return nil
-    end
-
-    -- 执行目标过滤判定
-    if targeting_def.testfn(self.inst, target) ~= true then
-        return nil
-    end
-
-    return self:BuildBufferedAction(target, nil, skill_id, not TheWorld.ismastersim)
-end
 
 function NikkiSkillCaster:GetAvailableSkillAction(target, pos, right)
     if not self.inst or not self.inst:IsValid() then return nil end
@@ -227,6 +135,7 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
     log.debug("[NikkiSkillCaster] TryExecute called for skill '%s' with params: %s", tostring(skill_id), tostring(params))
 
     local skill_manager = GetSkillManager(self)
+    local pc = self.inst.components.playercontroller
     if not skill_manager then
         log.debug("[NikkiSkillCaster] No skill manager found")
         return false, "NO_MANAGER"
@@ -239,31 +148,15 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
     end
     local is_rpc = params and params.is_rpc
     local is_client = not TheWorld.ismastersim
-    -- 只有非 RPC 发起（即玩家本地交互）且具备 targeting 定义时，才触发瞄准切换
-    local targeting_def = skill_manager:GetSkillTargetingDef(skill_id)
-    if targeting_def and not is_rpc then
-        local mode = targeting_def.mode
-        if mode == "target" then
-            log.debug("[NikkiSkillCaster] Toggled aiming for skill '%s'", tostring(skill_id))
-            self:ToggleAiming(skill_id)
-            return true
-        elseif mode == "pos" then
-            local spell_caster = self.spell_caster or self.inst.spell_caster
-            local spell_index = skill_manager:GetSkillSpellIndex(skill_id)
-            if not spell_caster then
-                log.debug("[NikkiSkillCaster] Cannot enter AOE targeting: spell_caster is nil for skill '%s'", tostring(skill_id))
-                return false, "NO_SPELL_CASTER"
-            end
-            if not spell_index then
-                log.debug("[NikkiSkillCaster] Cannot enter AOE targeting: spell_index is nil for skill '%s'", tostring(skill_id))
-                return false, "NO_SPELL_INDEX"
-            end
-            if spell_caster and spell_caster.components.spellbook then
-                if spell_caster.components.spellbook:SelectSpell(spell_index) then
-                    log.debug("[NikkiSkillCaster] Selected spell '%s' for AOE targeting", tostring(skill_id))
-                    self.inst.components.playercontroller:StartAOETargetingUsing(spell_caster)
-                    return true
-                end
+    -- 只有非 RPC 发起（即玩家本地交互） 且技能定义为 AOE 的情况下，才会进入瞄准模式
+    if def.is_aoe and not is_rpc then
+        local spell_caster = self.spell_caster or self.inst.spell_caster
+        local spell_index = skill_manager:GetSkillSpellIndex(skill_id)
+        if spell_index and spell_caster and spell_caster.components.spellbook then
+            if spell_caster.components.spellbook:SelectSpell(spell_index) then
+                log.debug("[NikkiSkillCaster] Entering AOE targeting mode for skill '%s' (spell index: %d)", tostring(skill_id), spell_index)
+                pc:StartAOETargetingUsing(spell_caster)
+                return true
             end
         end
     end
@@ -290,12 +183,19 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
         if not target and action_def.fallback and action_def.fallback.target then
             target = action_def.fallback.target(self.inst, params, def)
         end
-        if not target or not target:IsValid() then return false, "MISSING_OR_INVALID_TARGET" end
+        if not target or not target:IsValid() then
+            log.debug("[NikkiSkillCaster] Missing or invalid target for skill '%s' with invoke type 'target'",
+                tostring(skill_id))
+            return false, "MISSING_OR_INVALID_TARGET"
+        end
     elseif invoke == "pos" then
         if not pos and action_def.fallback and action_def.fallback.pos then
             pos = action_def.fallback.pos(self.inst, params, def)
         end
-        if not pos then return false, "MISSING_POS" end
+        if not pos then
+            log.debug("[NikkiSkillCaster] Missing position for skill '%s' with invoke type 'pos'", tostring(skill_id))
+            return false, "MISSING_POS"
+        end
     end
 
     local act = self:BuildBufferedAction(target, pos, skill_id, is_client)
@@ -305,14 +205,10 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
         log.debug("[NikkiSkillCaster] Failed to build buffered action for skill '%s'", tostring(skill_id))
         return false, "BUILD_ACTION_FAILED"
     end
-
-    local pc = self.inst.components.playercontroller
     if pc then
         pc:DoAction(act)
-        log.debug("[NikkiSkillCaster] Action for skill '%s' dispatched to player controller", tostring(skill_id))
         return true
     end
-    log.debug("[NikkiSkillCaster] No player controller found to dispatch action for skill '%s'", tostring(skill_id))
     return false
 end
 

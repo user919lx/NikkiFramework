@@ -29,21 +29,7 @@ local function MakeClickOverride(is_right_click)
         if not cmp_caster then
             return {}, true
         end
-
         local actions = {}
-
-        -- 右键且处于瞄准状态优先尝试获取瞄准动作
-        if is_right_click and cmp_caster:IsAiming() then
-            local act = cmp_caster:BuildTargetAimAction(target)
-            if act then
-                table.insert(actions, act)
-                return actions
-            else
-                return {}, true
-            end
-        end
-
-        -- 常规上下文动作匹配
         local act = cmp_caster:GetAvailableSkillAction(target, pos, is_right_click)
         if act then
             table.insert(actions, act)

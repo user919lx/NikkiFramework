@@ -1,30 +1,5 @@
--- scripts/resolvers/skill_resolver.lua
 local BaseResolver = require("resolvers/base_resolver")
 local log = require("utils/log")
-
-local SG_STATE_MAP = {
-    ["book"] = { "book" },
-    ["castspellmind"] = { "willow_ember" },
-    ["remotecast_pre"] = { "remotecontrol" },
-    ["commune_with_abigail"] = { "abigail_flower" },
-    ["slingshot_special"] = { "slingshot" },
-    ["combat_lunge_start"] = { "aoeweapon_lunge" },
-    ["combat_leap_start"] = { "aoeweapon_leap" },
-    ["combat_superjump_start"] = { "aoeweapon_leap", "superjump" },
-    ["parry_pre"] = { "parryweapon" },
-    ["blowdart_special"] = { "blowdart" },
-    ["throw_line"] = { "throw_line" },
-    ["castspell"] = {},
-}
-
-local function GetCasterOwner(inst)
-    local parent = inst.entity:GetParent()
-    if parent and parent:IsValid() then return parent end
-    if inst.components.inventoryitem and inst.components.inventoryitem:GetGrandOwner() then
-        return inst.components.inventoryitem:GetGrandOwner()
-    end
-    return not TheWorld.ismastersim and ThePlayer or nil
-end
 
 local SkillResolver = Class(BaseResolver, function(self, defs)
     self._resolver_type = "skill"
@@ -32,73 +7,153 @@ local SkillResolver = Class(BaseResolver, function(self, defs)
     BaseResolver._ctor(self, defs)
 end)
 
--- ============================================================
--- 1. 编译生命周期钩子
--- ============================================================
+
+--- AOE 搜索函数工厂
+--- @param anchor string "point" | "self" | "dir"
+--- @param radius number 圆形搜索半径（已由外部完成缺省回退处理）
+--- @param selector table|nil 标签筛选器表 { must_have, must_have_one_of, cant_have }
+--- @return function|nil search_fn (inst, pos) -> targets
+local function CreateAOESearchFn(anchor, radius, selector)
+    -- 1. 无 selector 或为 dir 模式时，不生成搜索函数
+    if selector == nil or anchor == "dir" then
+        return nil
+    end
+    -- 2. 闭包外预解析好 Tag 数组
+    local must_have        = selector.must_have
+    local must_have_one_of = selector.must_have_one_of
+    local cant_have        = selector.cant_have
+    -- 3. 根据 anchor 生成对应的搜索闭包
+    if anchor == "point" then
+        local search_radius = radius or 1
+        return function(inst, pos)
+            if not pos then
+                return {}
+            end
+            local x, z = pos.x, pos.z
+            return TheSim:FindEntities(x, 0, z, search_radius, must_have, cant_have, must_have_one_of)
+        end
+    elseif anchor == "self" then
+        local search_radius = radius or 1
+        return function(inst, pos)
+            if not inst or not inst:IsValid() then
+                return {}
+            end
+            local x, y, z = inst.Transform:GetWorldPosition()
+            return TheSim:FindEntities(x, 0, z, search_radius, must_have, cant_have, must_have_one_of)
+        end
+    end
+    return nil
+end
+-- ==========================================================================
+-- 占位回调函数（遵循 reticule.lua 的回调签名）
+-- ==========================================================================
+-- preset == "self"
+local function SelfMouseTargetFn(inst, mousepos)
+    if mousepos == nil then
+        return nil
+    end
+    local owner = ThePlayer
+    if owner then
+        local pos = Vector3(owner.Transform:GetWorldPosition())
+        return pos
+    end
+end
+local function SelfUpdatePositionFn(inst, pos, reticule, ease, smoothing, dt)
+    local owner = ThePlayer
+    if owner then
+        reticule.Transform:SetPosition(Vector3(owner.Transform:GetWorldPosition()):Get())
+        reticule.Transform:SetRotation(0)
+    end
+end
+
+-- 3. 朝向锁定 (dir) 占位
+local function LineMouseTargetFn(inst, mousepos)
+    if mousepos ~= nil then
+        local x, y, z = inst.Transform:GetWorldPosition()
+        local dx = mousepos.x - x
+        local dz = mousepos.z - z
+        local l = dx * dx + dz * dz
+        if l <= 0 then
+            return inst.components.reticule.targetpos
+        end
+        l = 6.5 / math.sqrt(l)
+        return Vector3(x + dx * l, 0, z + dz * l)
+    end
+end
+
+local function LineUpdatePositionFn(inst, pos, reticule, ease, smoothing, dt)
+    reticule.Transform:SetPosition(ThePlayer.Transform:GetWorldPosition())
+    local rot1 = reticule:GetAngleToPoint(inst.components.reticule.targetpos)
+    if ease and dt then
+        local rot = reticule.Transform:GetRotation()
+        local drot = ReduceAngle(rot1 - rot)
+        rot1 = Lerp(rot, rot + drot, dt * smoothing)
+    end
+    reticule.Transform:SetRotation(rot1)
+end
+
+-- ==========================================================================
+-- 预编译
+-- ==========================================================================
 -- 预编译添加信息
+-- reticule 的全局基础默认值（参考 aoetargeting 与 reticule 源码）
+local DEFAULT_RETICULE = {
+    reticuleprefab = "reticule",
+    validcolour = { 1, .75, 0, 1 },
+    invalidcolour = { .5, 0, 0, 1 },
+    ease = true,
+    smoothing = 6.66,
+    mouseenabled = true,
+}
+-- 编译生命周期钩子
 function SkillResolver:OnDefAdded(skill_id, def)
+    def.targeting = def.targeting or {}
+    def.excutor = {} -- 执行时的相关函数
     def.priority = def.priority or 0
-    local targeting_def = def.targeting
-    def.is_spell = targeting_def and targeting_def.mode == "pos"
+    def.range = def.range or 0
+    def.radius = def.radius or 0
 
-    -- Wheel 编译
-    -- if type(def.wheel) == "table" and type(def.wheel.ui) == "table" then
-    --     local w_def = def.wheel
-    --     local ui = w_def.ui
-    --     local aoe = w_def.aoe or {}
+    local aoe_def = def.aoe
+    local is_aoe = aoe_def ~= nil
+    def.is_aoe = is_aoe
 
-    --     local anim_cfg = ui.anim or (ui.bank and ui)
-    --     local image_cfg = ui.image or (ui.atlas and ui)
-    --     local is_anim = anim_cfg ~= nil and (anim_cfg.bank or anim_cfg.build or anim_cfg.anims)
-
-    --     local checkcooldown_fn = nil
-    --     local checkenabled_fn = nil
-
-    --     if is_anim then
-    --         checkcooldown_fn = function(owner)
-    --             if owner and owner.components.spellbookcooldowns then
-    --                 return owner.components.spellbookcooldowns:GetSpellCooldownPercent(skill_id)
-    --             end
-    --             return nil
-    --         end
-    --         checkenabled_fn = ui.checkenabled
-    --     else
-    --         local user_checkenabled = ui.checkenabled
-    --         checkenabled_fn = function(owner)
-    --             if owner and owner.components.spellbookcooldowns and owner.components.spellbookcooldowns:IsInCooldown(skill_id) then
-    --                 return false
-    --             end
-    --             if user_checkenabled then
-    --                 return user_checkenabled(owner)
-    --             end
-    --             return true
-    --         end
-    --     end
-
-    --     self.compiled_wheels[skill_id] = {
-    --         id = skill_id,
-    --         name = def.name or skill_id,
-    --         instant = w_def.instant == true,
-    --         is_anim = is_anim,
-    --         anim_cfg = is_anim and anim_cfg or nil,
-    --         image_cfg = (not is_anim) and image_cfg or nil,
-    --         checkcooldown = checkcooldown_fn,
-    --         checkenabled = checkenabled_fn,
-    --         widget_scale = ui.widget_scale or 0.6,
-    --         hit_radius = ui.hit_radius or (not is_anim and 50 or nil),
-    --         clicksound = ui.clicksound,
-    --         spacer = ui.spacer,
-    --         nestedwheel = ui.nestedwheel,
-    --         helptext = ui.helptext,
-    --         aoe = aoe,
-    --         state = aoe.state,
-    --         allow_water = aoe.allow_water,
-    --         deploy_radius = aoe.deploy_radius,
-    --         target_fx = aoe.target_fx,
-    --         should_repeat_cast_fn = aoe.should_repeat_cast_fn,
-    --         reticule = aoe.reticule,
-    --     }
-    -- end
+    -- 瞄准器相关配置流程
+    local reticule = {}
+    for k, v in pairs(DEFAULT_RETICULE) do
+        reticule[k] = v
+    end
+    if is_aoe then
+        local anchor = aoe_def.anchor or "point"
+        local radius = aoe_def.radius or (anchor ~= "point" and def.range) or 1
+        if aoe_def.selector then
+            local search_fn = CreateAOESearchFn(anchor, radius, aoe_def.selector)
+            def.excutor.search_fn = search_fn
+            reticule.search_fn = search_fn
+        end
+        -- 补全瞄准器配置
+        reticule.radius = radius
+        reticule.reticuleprefab = "nikki_reticule"
+        reticule.pingprefab = "nikki_reticule_ping"
+        if anchor == "point" then
+            reticule.shape = "CIRCLE"
+        elseif anchor == "self" then
+            reticule.shape = "CIRCLE"
+            reticule.mousetargetfn = SelfMouseTargetFn
+            reticule.updatepositionfn = SelfUpdatePositionFn
+        elseif anchor == "dir" then
+            reticule.shape = "ARROW"
+            -- reticule.shape_param = 2
+            reticule.mousetargetfn = LineMouseTargetFn
+            reticule.updatepositionfn = LineUpdatePositionFn
+        end
+    end
+    local user_reticule = def.targeting.reticule
+    if user_reticule then
+        for k, v in pairs(user_reticule) do
+            reticule[k] = v
+        end
+    end
+    def.targeting.reticule = reticule
 end
 
 -- ============================================================
@@ -133,14 +188,14 @@ function SkillResolver:GetTargetingDef(skill_id)
     return def and def.targeting or nil
 end
 
-
 --- 查询指定技能是否已编译轮盘配置
 function SkillResolver:IsSpellItem(skill_id)
     local def = self:GetDef(skill_id)
-    return def and def.is_spell == true or false
+    return def and def.is_aoe == true or false
 end
+
 -- ============================================================
--- 3. 施法装配和查询
+-- 3. 施法装配
 -- ============================================================
 --- 根据活跃技能列表过滤并提取可展示在轮盘/施法书中的技能 ID 列表
 ---@param skill_ids string[] 当前活跃技能 ID 数组
@@ -156,93 +211,76 @@ function SkillResolver:FilterSpellIds(skill_ids)
         end
     end
     table.sort(valid_items, function(a, b)
-        return self:GetPriority(a) > self:GetPriority(b)
+        local pa = self:GetPriority(a)
+        local pb = self:GetPriority(b)
+        if pa == pb then
+            return a < b
+        end
+        return pa > pb
     end)
     return valid_items
 end
 
 --- 构建供 Spell 使用的数据条目
 --- @param skill_id string 技能 ID
---- @param user EntityScript 施法者实体
 --- @return table item 供 spellbook组件 使用的条目
-function SkillResolver:_BuildSpellItem(skill_id, order)
+function SkillResolver:_BuildSpellItem(skill_id)
+    local def = self:GetDef(skill_id)
     local item = {
         skill_id = skill_id,
-        order = order,
+        priority = def.priority or 0
     }
-    local def = self:GetDef(skill_id)
     if def then
         local name = self:GetDisplayName(skill_id)
-        item.ui = {
-            label = name,
-        }
-        local targeting_def = def.targeting
-        local is_aoe_targeting = targeting_def and targeting_def.mode == "pos"
+        local targeting_def = def.targeting or {}
+        local exutor = def.excutor or {}
+        local action_def = def.action or {}
         item.onselect = function(spell_caster)
-            if spell_caster.components.spellbook then
-                spell_caster.components.spellbook:SetSpellName(name)
+            if not spell_caster.components.spellbook or not spell_caster.components.aoetargeting then
+                log.error("[SkillResolver] Spell caster entity does not have required components for skill '%s'",
+                    tostring(skill_id))
+                return
             end
-            if is_aoe_targeting then
+            spell_caster.components.spellbook:SetSpellName(name)
+            if def.is_aoe then
+                spell_caster._nikki_aoe_state = action_def.state
                 local should_repeat_cast_fn = nil
                 if targeting_def.should_repeat_cast_fn then
                     should_repeat_cast_fn = function(caster, doer)
                         return targeting_def.should_repeat_cast_fn(doer)
                     end
                 end
-                local action_def = def.action
-                if action_def and action_def.state then
-                    spell_caster._nikki_aoe_state = action_def.state
-                end
                 spell_caster.components.aoetargeting:SetAllowWater(targeting_def.allow_water or false)
                 spell_caster.components.aoetargeting:SetDeployRadius(targeting_def.deploy_radius)
                 spell_caster.components.aoetargeting:SetShouldRepeatCastFn(should_repeat_cast_fn)
-                local native_reticule = spell_caster.components.aoetargeting.reticule
-                if native_reticule then
-                    -- 设置默认值
-                    native_reticule.reticuleprefab = "reticuleaoe"
-                    native_reticule.pingprefab = "reticuleaoeping"
-                    native_reticule.targetfn = nil
-                    native_reticule.mousetargetfn = nil
-                    native_reticule.updatepositionfn = nil
-                    native_reticule.validcolour = { 1, .75, 0, 1 }
-                    native_reticule.invalidcolour = { .5, 0, 0, 1 }
-                    native_reticule.ease = true
-                    native_reticule.mouseenabled = true
-                    native_reticule.twinstickmode = 1
-                    native_reticule.twinstickrange = 8
-                    native_reticule.twinstickrange = 8
-                    if targeting_def.reticule then
-                        for k, v in pairs(targeting_def.reticule) do
-                            native_reticule[k] = v
-                        end
-                    end
-                end
+                spell_caster.components.aoetargeting:SetReticule(targeting_def.reticule)
                 if TheWorld.ismastersim then
-                    log.debug("[SkillResolver] Setting up AOE targeting for skill '%s' with targeting definition: %s", tostring(skill_id), tostring(targeting_def))
                     spell_caster.components.aoetargeting:SetTargetFX(targeting_def.target_fx)
                     spell_caster.components.spellbook:SetSpellFn(nil)
-                    spell_caster.components.aoespell:SetSpellFn(function(inst, doer, pt)
-                        inst._nikki_aoe_state = nil
-                        log.debug("[SkillResolver] Executing skill '%s' at position %s", tostring(skill_id), tostring(pt))
+                    spell_caster.components.aoespell:SetSpellFn(function(caster, doer, pt)
+                        local params = {
+                            pos = pt
+                        }
+                        if exutor.search_fn then
+                            local targets = exutor.search_fn(doer, pt)
+                            params.targets = targets
+                        end
                         local caster_comp = doer.components.nikki_skill_caster
                         if caster_comp then
-                            log.debug("[SkillResolver] Found caster component for doer '%s', executing skill.", tostring(doer))
-                            return caster_comp:Execute(skill_id, { pos = pt })
+                            return caster_comp:Execute(skill_id, params)
                         end
-                        log.debug("[SkillResolver] No caster component found for doer '%s', cannot execute skill.", tostring(doer))
+                        caster._nikki_aoe_state = nil
                         return false, "NO_CASTER_COMP"
                     end)
                 end
             end
         end
     end
-
     return item
 end
 
 --- 批量构建供 spellbook组件 使用的 Items 数组（保持原数组顺序）
 ---@param skill_ids string[] 有序技能 ID 列表
----@param user EntityScript 施法者实体
 ---@return table[] items  用于spellbook组件 SetItems的数组
 function SkillResolver:BuildSpellItemsByIds(skill_ids)
     if not skill_ids or #skill_ids == 0 then
@@ -250,14 +288,11 @@ function SkillResolver:BuildSpellItemsByIds(skill_ids)
     end
     local items = {}
     for order, skill_id in ipairs(skill_ids) do
-        local item = self:_BuildSpellItem(skill_id, order)
+        local item = self:_BuildSpellItem(skill_id)
         if item then
             table.insert(items, item)
         end
     end
-    table.sort(items, function(a, b)
-        return (a.order or 0) < (b.order or 0)
-    end)
     return items
 end
 
