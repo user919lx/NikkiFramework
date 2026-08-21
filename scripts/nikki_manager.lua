@@ -4,8 +4,8 @@ local EffectResolver = require("resolvers/effect_resolver")
 local SkillResolver = require("resolvers/skill_resolver")
 local StateResolver = require("resolvers/state_resolver")
 local TriggerResolver = require("resolvers/trigger_resolver")
-local ModifierAdapter = require("utils/modifier_adapter")
-local ResourceAdapter = require("utils/resource_adapter")
+local ModifierAdapter = require("adapters/modifier_adapter")
+local ResourceAdapter = require("adapters/resource_adapter")
 local json = require("json")
 
 -- ============================================================

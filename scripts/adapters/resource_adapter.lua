@@ -1,4 +1,3 @@
--- scripts/utils/resource_adapter.lua
 local log = require("utils/log")
 local SourceModifierList = require("util/sourcemodifierlist")
 local ResourceAdapter = {}

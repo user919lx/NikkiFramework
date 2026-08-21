@@ -1,8 +1,8 @@
 -- scripts/components/nikki_effect.lua
 local log = require("utils/log")
 local TimerScheduler = require("utils/timer_scheduler")
-local ResourceAdapter = require("utils/resource_adapter")
-local ModifierAdapter = require("utils/modifier_adapter")
+local ResourceAdapter = require("adapters/resource_adapter")
+local ModifierAdapter = require("adapters/modifier_adapter")
 
 -- ============================================================
 -- 内部辅助：资源速率处理

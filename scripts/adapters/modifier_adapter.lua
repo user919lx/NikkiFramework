@@ -1,4 +1,3 @@
--- scripts/utils/modifier_adapter.lua
 local log = require("utils/log")
 
 local ModifierAdapter = {}

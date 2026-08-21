@@ -1,6 +1,6 @@
 -- scripts/components/nikki_skill_caster.lua
 local log = require("utils/log")
-local ResourceAdapter = require("utils/resource_adapter")
+local ResourceAdapter = require("adapters/resource_adapter")
 local DEFAULT_WHEEL_RADIUS = 100
 local DEFAULT_WHEEL_FOCUS_RADIUS = DEFAULT_WHEEL_RADIUS + 3
 
