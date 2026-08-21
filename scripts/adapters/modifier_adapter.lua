@@ -2,75 +2,8 @@ local log = require("utils/log")
 
 local ModifierAdapter = {}
 
--- 属性修饰策略表，彻底解耦 if/elseif 分支
-local MODIFIER_STRATEGIES = {
-    -- 攻击倍率增量 (正数为加攻)
-    atk = {
-        apply = function(inst, val, key)
-            if inst.components.combat and inst.components.combat.externaldamagemultipliers then
-                inst.components.combat.externaldamagemultipliers:SetModifier(inst, val, key)
-            end
-        end,
-        remove = function(inst, key)
-            if inst.components.combat and inst.components.combat.externaldamagemultipliers then
-                inst.components.combat.externaldamagemultipliers:RemoveModifier(inst, key)
-            end
-        end
-    },
-    -- 承受伤害倍率增量 (正数为易伤，负数为减伤，在防具结算后生效)
-    dmg_taken = {
-        apply = function(inst, val, key)
-            if inst.components.combat and inst.components.combat.externaldamagetakenmultipliers then
-                inst.components.combat.externaldamagetakenmultipliers:SetModifier(inst, val, key)
-            end
-        end,
-        remove = function(inst, key)
-            if inst.components.combat and inst.components.combat.externaldamagetakenmultipliers then
-                inst.components.combat.externaldamagetakenmultipliers:RemoveModifier(inst, key)
-            end
-        end
-    },
-    -- 移速倍率增量 (正数为加速)
-    spd = {
-        apply = function(inst, val, key)
-            if inst.components.locomotor then
-                -- 完美抹平引擎差异：locomotor 的参数顺序与 combat 是反的 (先 src, 后 val)
-                inst.components.locomotor:SetExternalSpeedMultiplier(inst, key, val)
-            end
-        end,
-        remove = function(inst, key)
-            if inst.components.locomotor then
-                inst.components.locomotor:RemoveExternalSpeedMultiplier(inst, key)
-            end
-        end
-    },
-    fire_damage_scale = {
-        apply = function(inst, val, key)
-            if inst.components.health then
-                inst.components.health.fire_damage_scale = val
-            end
-        end,
-        remove = function(inst, key)
-            if inst.components.health then
-                inst.components.health.fire_damage_scale = 1
-            end
-        end
-    },
-    -- 免疫昏睡
-    grogginess_immunity = {
-        apply = function(inst, val, key)
-            if val ~= true then return end
-            if inst.components.grogginess then
-                inst.components.grogginess:AddImmunitySource(key)
-            end
-        end,
-        remove = function(inst, key)
-            if inst.components.grogginess then
-                inst.components.grogginess:RemoveImmunitySource(key)
-            end
-        end
-    },
-}
+-- 属性修饰策略表，初始为空，全靠外部配置注入
+local MODIFIER_STRATEGIES = {}
 
 -- 对外开放的注册接口，允许配置字典注入新的属性算法
 function ModifierAdapter.RegisterStrategy(mod_type, strategy, env)

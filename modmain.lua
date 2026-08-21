@@ -138,21 +138,7 @@ AddComponentPostInit("reticule", function(self)
         end
     end
 end)
--- local function MakeReticuleRadiusSetter(base_radius)
---     return function(inst)
---         inst._base_radius = base_radius
---         inst.SetRadius = function(self, radius)
---             local scale = math.sqrt(radius / self._base_radius)
---             self.Transform:SetScale(scale, scale, scale)
---         end
---     end
--- end
--- local RETICULE_CONFIGS = {
---     { prefab = "reticuleaoe", base_radius = 4 },
--- }
--- for _, cfg in ipairs(RETICULE_CONFIGS) do
---     AddPrefabPostInit(cfg.prefab, MakeReticuleRadiusSetter(cfg.base_radius))
--- end
+
 if not GLOBAL.TheNet:IsDedicated() then
     GLOBAL.TheInput:AddKeyHandler(function(key, down)
         if not down then return end
