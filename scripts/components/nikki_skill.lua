@@ -169,13 +169,23 @@ end
 function NikkiSkill:GetCooldown(skill_id)
     local expire_time = self._cooldowns[skill_id]
     if not expire_time then return 0 end
-
     local remain = expire_time - GetTime()
     if remain <= 0 then
         self._cooldowns[skill_id] = nil
         return 0
     end
     return remain
+end
+
+function NikkiSkill:GetCooldownPercent(skill_id)
+    local resolver = self._resolver
+    if not resolver then return 0 end
+    local total_cooldown = resolver and resolver:GetCooldown(skill_id)
+    if not total_cooldown or total_cooldown <= 0 then
+        return 0
+    end
+    local remain = self:GetCooldown(skill_id)
+    return remain / total_cooldown
 end
 
 function NikkiSkill:IsOnCooldown(skill_id)

@@ -1,6 +1,8 @@
 -- scripts/components/nikki_skill_caster.lua
 local log = require("utils/log")
 local ResourceAdapter = require("utils/resource_adapter")
+local DEFAULT_WHEEL_RADIUS = 100
+local DEFAULT_WHEEL_FOCUS_RADIUS = DEFAULT_WHEEL_RADIUS + 3
 
 local function GetSkillManager(self)
     if self == nil or self.inst == nil then return nil end
@@ -22,15 +24,18 @@ function NikkiSkillCaster:Init()
             self.spell_caster:Attach(self.inst)
             self.inst.spell_caster = self.spell_caster
             self:_RefreshSpell()
+            self:_RefreshWheel()
         end
     else
         if self.inst.spell_caster ~= nil then
             self:_RefreshSpell()
+            self:_RefreshWheel()
         else
             local callback
             callback = function(inst, caster)
-                self.inst:RemoveEventListener("nikki_spell_caster_ready", callback)
+                self.inst:RemoveEventCallback("nikki_spell_caster_ready", callback)
                 self:_RefreshSpell()
+                self:_RefreshWheel()
             end
             self.inst:ListenForEvent("nikki_spell_caster_ready", callback)
         end
@@ -52,25 +57,82 @@ function NikkiSkillCaster:Init()
 end
 
 -- ============================================================
+-- 查询
+-- ============================================================
+function NikkiSkillCaster:GetSpellIndex(skill_id)
+    return self._spell_index_map[skill_id]
+end
+
+-- ============================================================
 -- 轮盘与界面状态控制
 -- ============================================================
+function NikkiSkillCaster:IsWheelOpen()
+    local hud = self.inst.HUD
+    if hud and hud.controls and hud.controls.spellwheel then
+        return hud.controls.spellwheel:IsOpen()
+    end
+    return self.is_wheel_open
+end
 
 function NikkiSkillCaster:CloseWheel()
     self.is_wheel_open = false
-    -- TODO: 在这里补充调用 HUD 关闭轮盘 UI 的具体逻辑
-    -- 例如: if ThePlayer and ThePlayer.HUD then ThePlayer.HUD:CloseSkillWheel() end
+    local hud = self.inst.HUD
+    if hud and hud.controls and hud.controls.spellwheel and hud.controls.spellwheel:IsOpen() then
+        hud.controls.spellwheel:Close()
+    end
 end
 
-function NikkiSkillCaster:OpenWheel()
-    -- 开启前必须强制取消当前瞄准状态
+function NikkiSkillCaster:OpenWheel(radius, focus_radius)
     if self.inst.components.playercontroller ~= nil then
         self.inst.components.playercontroller:CancelAOETargeting()
     end
+    
+    -- 以实际 HUD 打开状态为准拦截
+    if self:IsWheelOpen() then return end
 
+    local hud = self.inst.HUD
+    if not hud or not hud.controls or not hud.controls.spellwheel then
+        log.debug("[NikkiSkillCaster] Cannot open wheel: HUD or spellwheel not found")
+        return
+    end
+
+    local items = self:GetWheelItems()
+    local itemscpy = {}
+    for i, v in ipairs(items) do
+        local can_show = true
+        for _, tag in ipairs(v.required_tags or {}) do
+            if not self.inst:HasTag(tag) then
+                can_show = false
+                break
+            end
+        end
+        if can_show then
+            local itemcpy = shallowcopy(v)
+            itemcpy.execute = function()
+                v.execute(self)
+            end
+            itemcpy.onfocus = function()
+                for j, v2 in ipairs(items) do
+                    v2.selected = (i == j) or nil
+                end
+            end
+            table.insert(itemscpy, itemcpy)
+        end
+    end
+
+    -- 拦截空数据，杜绝 360/0 崩溃
+    if #itemscpy == 0 then
+        log.debug("[NikkiSkillCaster] No wheel items available to display")
+        return
+    end
+
+    radius = radius or DEFAULT_WHEEL_RADIUS
+    focus_radius = focus_radius or DEFAULT_WHEEL_FOCUS_RADIUS
     self.is_wheel_open = true
 
-    -- TODO: 在这里补充调用 HUD 打开轮盘 UI 的具体逻辑，传入 self._wheel_items
-    -- 例如: if ThePlayer and ThePlayer.HUD then ThePlayer.HUD:OpenSkillWheel(self._wheel_items) end
+    hud.controls.spellwheel:SetScale(TheFrontEnd:GetProportionalHUDScale())
+    hud.controls.spellwheel:SetItems(itemscpy, radius, focus_radius)
+    hud.controls.spellwheel:Open()
 end
 
 function NikkiSkillCaster:GetWheelItems()
@@ -193,13 +255,16 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
         log.debug("[NikkiSkillCaster] Skill definition not found for skill '%s'", tostring(skill_id))
         return false, "SKILL_DEF_NOT_FOUND"
     end
+    if def.client_only and not TheWorld.ismastersim then
+        return self:Execute(skill_id, params)
+    end
 
     local is_rpc = params and params.is_rpc
     local is_client = not TheWorld.ismastersim
 
     if def.is_aoe and not is_rpc then
         local spell_caster = self.spell_caster or self.inst.spell_caster
-        local spell_index = self._spell_index_map[skill_id]
+        local spell_index = self:GetSpellIndex(skill_id)
         if spell_index and spell_caster and spell_caster.components.spellbook then
             if spell_caster.components.spellbook:SelectSpell(spell_index) then
                 log.debug("[NikkiSkillCaster] Entering AOE targeting mode for skill '%s' (spell index: %d)",

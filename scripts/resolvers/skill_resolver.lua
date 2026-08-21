@@ -106,7 +106,7 @@ local DEFAULT_RETICULE = {
     mouseenabled = true,
 }
 -- 编译生命周期钩子
-function SkillResolver:OnDefAdded(skill_id, def)
+function SkillResolver:OnDefAdded(id, def)
     def.targeting = def.targeting or {}
     def.excutor = {} -- 执行时的相关函数
     def.priority = def.priority or 0
@@ -141,7 +141,7 @@ function SkillResolver:OnDefAdded(skill_id, def)
             reticule.mousetargetfn = SelfMouseTargetFn
             reticule.updatepositionfn = SelfUpdatePositionFn
         elseif anchor == "dir" then
-            reticule.shape = "ARROW"
+            reticule.shape = "LINE"
             -- reticule.shape_param = 2
             reticule.mousetargetfn = LineMouseTargetFn
             reticule.updatepositionfn = LineUpdatePositionFn
@@ -154,6 +154,43 @@ function SkillResolver:OnDefAdded(skill_id, def)
         end
     end
     def.targeting.reticule = reticule
+    -- 轮盘相关配置
+    if def.wheel then
+        def.wheel.label = def.wheel.label or self:GetDisplayName(id)
+        local user_checkenabled = def.wheel.checkenabled
+        if def.wheel.image then
+            for k, v in pairs(def.wheel.image) do
+                def.wheel[k] = v
+            end
+            def.wheel.image = nil
+            def.wheel.checkcooldown = nil
+            def.wheel.checkenabled = function(owner)
+                local skill_replica = owner and (owner.replica.nikki_skill or owner.components.nikki_skill)
+                if skill_replica and skill_replica:IsOnCooldown(id) then
+                    return false
+                end
+                return user_checkenabled == nil or user_checkenabled(owner)
+            end
+        elseif def.wheel.anim then
+            for k, v in pairs(def.wheel.anim) do
+                def.wheel[k] = v
+            end
+            def.wheel.anim = nil
+            def.wheel.checkcooldown = function(owner)
+                local skill_replica = owner and (owner.replica.nikki_skill or owner.components.nikki_skill)
+                if skill_replica then
+                    return skill_replica:GetCooldownPercent(id)
+                end
+                return nil
+            end
+            def.wheel.checkenabled = function(owner)
+                if user_checkenabled then
+                    return user_checkenabled(owner)
+                end
+                return true
+            end
+        end
+    end
 end
 
 -- ============================================================
@@ -290,6 +327,39 @@ function SkillResolver:BuildSpellItemsByIds(skill_ids)
         end
     end
     return items, index_map
+end
+
+-- 构建轮盘Item
+function SkillResolver:BuildWheelItemsByIds(skill_ids)
+    local items = {}
+    for _, skill_id in ipairs(skill_ids) do
+        local def = self:GetDef(skill_id)
+        if def and def.wheel then
+            local item = {
+                skill_id = skill_id,
+            }
+            for k, v in pairs(def.wheel) do
+                item[k] = v
+            end
+            item.priority = def.priority or 0
+            item.required_tags = def.required_tags or {}
+            item.execute = function(cmp_caster)
+                if cmp_caster then
+                    return cmp_caster:TryExecute(skill_id)
+                end
+            end
+            table.insert(items, item)
+        end
+    end
+    table.sort(items, function(a, b)
+        local pa = a.priority or 0
+        local pb = b.priority or 0
+        if pa == pb then
+            return a.skill_id < b.skill_id
+        end
+        return pa > pb
+    end)
+    return items
 end
 
 return SkillResolver

@@ -74,6 +74,24 @@ function NikkiSkill:GetMaxRange()
     end
 end
 
+-- 冷却查询
+function NikkiSkill:GetCooldownPercent(skill_id)
+    if self.inst.components.spellbookcooldowns then
+        local pct = self.inst.components.spellbookcooldowns:GetSpellCooldownPercent(skill_id)
+        if pct and pct > 0 then
+            return pct
+        end
+    end
+    return nil
+end
+
+function NikkiSkill:IsOnCooldown(skill_id)
+    if self.inst.components.spellbookcooldowns then
+        return self.inst.components.spellbookcooldowns:IsInCooldown(skill_id)
+    end
+    return false
+end
+
 -- ============================================================
 -- 静态查询接口 (转发SkillResolver)
 -- ============================================================
