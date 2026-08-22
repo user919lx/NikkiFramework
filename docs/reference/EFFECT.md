@@ -110,7 +110,7 @@ drain = { res = "health", rate = 5 }
 drain = {
     res = "spark",
     rate = function(inst, context)
-        return context.layer >= 2 and 4 or 2
+        return context.layers >= 2 and 4 or 2
     end,
 }
 -- 回复
@@ -262,8 +262,8 @@ on_remove = function(inst, context)
 end,
 -- on_layer_update：根据层数切换灯光强度
 on_layer_update = function(inst, context)
-    local layer = context.layer
-    if layer >= 2 then
+    local layers = context.layers
+    if layers >= 2 then
         inst.Light:SetIntensity(1.0)
     else
         inst.Light:SetIntensity(0.5)
@@ -291,7 +291,7 @@ end,
 | 字段/方法 | 说明 |
 | :--- | :--- |
 | `def` | Effect定义数据 |
-| `layer` | 当前层数 |
+| `layers` | 当前层数 |
 | `start_time` | 首次激活时间 |
 | `end_times` | 各层结束时间队列 |
 | `data` | 自定义存储，初始 `{}` |

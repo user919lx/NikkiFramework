@@ -65,8 +65,8 @@ local effects = {
         stack = { mode = "add", max = 2 },
         drain = {
             res = "spark",
-            rate = function(inst, def, context)
-                return context.layer >= 2 and 2 or 1
+            rate = function(inst, context)
+                return context.layers >= 2 and 2 or 1
             end,
         },
         -- 自定义参数，供回调使用
@@ -84,9 +84,9 @@ local effects = {
                 colour = { 250 / 255, 225 / 255, 175 / 255 },
             },
         },
-        on_layer_update = function(inst, layers, def)
-            local params = def.params
-            local cfg = (layers >= 2) and params.enhanced or params.base
+        on_layer_update = function(inst, context)
+            local params = context.def.params
+            local cfg = (context.layers >= 2) and params.enhanced or params.base
             if not inst.Light then
                 inst.entity:AddLight()
             end
@@ -96,7 +96,7 @@ local effects = {
             inst.Light:SetColour(cfg.colour[1], cfg.colour[2], cfg.colour[3])
             inst.Light:Enable(true)
         end,
-        on_remove = function(inst, def, context)
+        on_remove = function(inst, context)
             if inst.Light then
                 inst.Light:Enable(false)
             end
@@ -110,10 +110,10 @@ local effects = {
         duration = 10,
         tags = { "blast_round" },
         bind_to_state = true, -- 切换 State 时自动移除
-        on_apply = function(inst, def, context)
+        on_apply = function(inst, context)
             inst.AnimState:SetBloomEffectHandle("shaders/anim.ksh")
         end,
-        on_remove = function(inst, def, context)
+        on_remove = function(inst, context)
             inst.AnimState:ClearBloomEffectHandle()
         end,
     },
@@ -131,11 +131,11 @@ local effects = {
                 range = 10,
             },
         },
-        fn = function(inst, dt, def, context)
+        fn = function(inst, dt, context)
             -- 每帧检查周围是否有火源，动态修改理智回复
             inst.components.sanity.custom_rate_fn = function(custom_inst)
-                local rate = def.params.fire_regen and def.params.fire_regen.rate or 0
-                local range = def.params.fire_regen and def.params.fire_regen.range or 0
+                local rate = context.def.params.fire_regen and context.def.params.fire_regen.rate or 0
+                local range = context.def.params.fire_regen and context.def.params.fire_regen.range or 0
                 if rate > 0 and FindEntity(custom_inst, range, nil, { "fire" }) ~= nil then
                     return rate
                 end
