@@ -24,11 +24,11 @@ function EffectResolver:OnDefAdded(id, def)
             end
         end
         local old_on_apply = def.on_apply
-        def.on_apply = function(inst, effect_def, context)
+        def.on_apply = function(inst, context)
             local aura_inst = SpawnPrefab("nikki_aura")
             if aura_inst then
                 aura_inst:Attach(inst)
-                aura_inst:SetRange(aura_cfg.radius)
+                aura_inst:SetRadius(aura_cfg.radius)
                 if type(aura_cfg.postinit) == "function" then
                     aura_cfg.postinit(aura_inst)
                 end
@@ -46,31 +46,34 @@ function EffectResolver:OnDefAdded(id, def)
                 context.aura_inst = aura_inst
             end
             if old_on_apply then
-                old_on_apply(inst, effect_def, context)
+                old_on_apply(inst, context)
             end
         end
         local old_on_remove = def.on_remove
-        def.on_remove = function(inst, effect_def, context)
+        def.on_remove = function(inst, context)
             if context.aura_inst and context.aura_inst:IsValid() then
                 context.aura_inst:Remove()
             end
             context.aura_inst = nil
             if old_on_remove then
-                old_on_remove(inst, effect_def, context)
+                old_on_remove(inst, context)
             end
         end
         def.aura = nil
     end
 end
+
 -- ============================================================
 -- 查询接口
 -- ============================================================
 
 function EffectResolver:GetEffectConfig(id)
     local def = self:GetDef(id)
-    if not def then return nil, 1, "refresh", false end
+    if not def then
+        return nil, 1, "ignore", false
+    end
     local max = def.stack and def.stack.max or 1
-    local mode = def.stack and def.stack.mode or "refresh"
+    local mode = def.stack and def.stack.mode or "ignore"
     return def.duration, max, mode, def.bind_to_state
 end
 
