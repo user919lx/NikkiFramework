@@ -631,6 +631,13 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
         inst._replica_skill_trigger_resolver = self.state_resolver
         -- HUD 处理
         inst:DoTaskInTime(0, function()
+            if inst.components.playeractionpicker then
+                inst.components.playeractionpicker.leftclickoverride = MakeClickOverride(false)
+                inst.components.playeractionpicker.rightclickoverride = MakeClickOverride(true)
+            end
+            if not inst.components.nikki_skill_caster then
+                inst:AddComponent("nikki_skill_caster")
+            end
             if not TheNet:IsDedicated() and inst == ThePlayer then
                 if not inst.range_indicator or not inst.range_indicator:IsValid() then
                     local indicator = SpawnPrefab("nikki_range_indicator")
@@ -638,11 +645,6 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
                     inst.range_indicator = indicator
                 end
                 inst:PushEvent("skill_range_toggle_changed", { new_state = self:GetSetting("show_range") })
-                inst.components.playeractionpicker.leftclickoverride = MakeClickOverride(false)
-                inst.components.playeractionpicker.rightclickoverride = MakeClickOverride(true)
-                if not inst.components.nikki_skill_caster then
-                    inst:AddComponent("nikki_skill_caster")
-                end
             end
         end)
     end
@@ -707,54 +709,18 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
 end
 
 -- ============================================================
--- 对外暴露 Resolver 实例
--- ============================================================
-function NikkiManager:GetEffectResolver()
-    return self.effect_resolver
-end
-
-function NikkiManager:GetSkillResolver()
-    return self.skill_resolver
-end
-
-function NikkiManager:GetStateResolver()
-    return self.state_resolver
-end
-
-function NikkiManager:GetTriggerResolver()
-    return self.trigger_resolver
-end
-
--- ============================================================
 -- 公开 API：技能
 -- ============================================================
-function NikkiManager:AddSkill(inst, skill_id, source)
-    source = source or "dynamic"
-    if not inst or not inst.components.nikki_skill then
-        log.warn("[NikkiManager] AddSkill: inst has no nikki_skill component.")
-        return false
+function NikkiManager:OpenSkillWheel(inst)
+    local cmp_caster = inst.components.nikki_skill_caster
+    if cmp_caster then
+        if cmp_caster:IsWheelOpen() then
+            cmp_caster:CloseWheel()
+        else
+            cmp_caster:OpenWheel()
+        end
     end
-    return inst.components.nikki_skill:AddSkill(skill_id, source)
-end
-
-function NikkiManager:RemoveSkill(inst, skill_id)
-    if not inst or not inst.components.nikki_skill then return false end
-    return inst.components.nikki_skill:RemoveSkill(skill_id)
-end
-
-function NikkiManager:HasSkill(inst, skill_id)
-    if not inst or not inst.components.nikki_skill then return false end
-    return inst.components.nikki_skill:IsAdded(skill_id)
-end
-
-function NikkiManager:GetCooldown(inst, skill_id)
-    if not inst or not inst.components.nikki_skill then return 0 end
-    return inst.components.nikki_skill:GetCooldown(skill_id)
-end
-
-function NikkiManager:ExecuteSkill(inst, skill_id, params)
-    if not inst or not inst.components.nikki_skill then return false, "NO_COMPONENT" end
-    return inst.components.nikki_skill:Execute(skill_id, params or {})
+    return true
 end
 
 -- ============================================================

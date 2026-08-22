@@ -86,7 +86,7 @@ function NikkiSkillCaster:OpenWheel(radius, focus_radius)
     if self.inst.components.playercontroller ~= nil then
         self.inst.components.playercontroller:CancelAOETargeting()
     end
-    
+
     -- 以实际 HUD 打开状态为准拦截
     if self:IsWheelOpen() then return end
 
@@ -242,17 +242,16 @@ end
 -- ============================================================
 function NikkiSkillCaster:TryExecute(skill_id, params)
     log.debug("[NikkiSkillCaster] TryExecute called for skill '%s' with params: %s", tostring(skill_id), tostring(params))
-
     local skill_manager = GetSkillManager(self)
     local pc = self.inst.components.playercontroller
     if not skill_manager then
-        log.debug("[NikkiSkillCaster] No skill manager found")
+        log.error("[NikkiSkillCaster] No skill manager found")
         return false, "NO_MANAGER"
     end
 
     local def = skill_manager:GetSkillDef(skill_id)
     if not def then
-        log.debug("[NikkiSkillCaster] Skill definition not found for skill '%s'", tostring(skill_id))
+        log.error("[NikkiSkillCaster] Skill definition not found for skill '%s'", tostring(skill_id))
         return false, "SKILL_DEF_NOT_FOUND"
     end
     if def.client_only and not TheWorld.ismastersim then
@@ -267,8 +266,6 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
         local spell_index = self:GetSpellIndex(skill_id)
         if spell_index and spell_caster and spell_caster.components.spellbook then
             if spell_caster.components.spellbook:SelectSpell(spell_index) then
-                log.debug("[NikkiSkillCaster] Entering AOE targeting mode for skill '%s' (spell index: %d)",
-                    tostring(skill_id), spell_index)
                 pc:StartAOETargetingUsing(spell_caster)
                 return true
             end
@@ -279,10 +276,8 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
     local action_def = def.action
     if not action_def then
         if TheWorld.ismastersim then
-            log.debug("[NikkiSkillCaster] Executing instant skill '%s' directly on server", tostring(skill_id))
             return self:Execute(skill_id, params)
         else
-            log.debug("[NikkiSkillCaster] Sending TryExecuteSkill RPC for skill '%s' to server", tostring(skill_id))
             SendModRPCToServer(GetModRPC("NikkiFramework", "TryExecuteSkill"), skill_id)
             return true
         end
@@ -298,6 +293,8 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
             target = action_def.fallback.target(self.inst, params, def)
         end
         if not target or not target:IsValid() then
+            log.debug("[NikkiSkillCaster] Missing or invalid target for skill '%s' that requires a target",
+                tostring(skill_id))
             return false, "MISSING_OR_INVALID_TARGET"
         end
     elseif invoke == "pos" then
@@ -305,12 +302,14 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
             pos = action_def.fallback.pos(self.inst, params, def)
         end
         if not pos then
+            log.debug("[NikkiSkillCaster] Missing position for skill '%s' that requires a position", tostring(skill_id))
             return false, "MISSING_POS"
         end
     end
 
     local act = self:BuildBufferedAction(target, pos, skill_id, is_client)
     if not act then
+        log.debug("[NikkiSkillCaster] Failed to build action for skill '%s'", tostring(skill_id))
         return false, "BUILD_ACTION_FAILED"
     end
 
@@ -318,6 +317,7 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
         pc:DoAction(act)
         return true
     end
+    log.debug("[NikkiSkillCaster] No playercontroller found to perform action for skill '%s'", tostring(skill_id))
     return false
 end
 
