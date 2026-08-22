@@ -762,15 +762,14 @@ end
 -- ============================================================
 function NikkiManager:ApplyEffect(target, effect_id, source)
     if not target then
-        log.warn("[NikkiManager] ApplyEffect: target is nil.")
         return false
     end
     if not effect_id then
-        log.warn("[NikkiManager] ApplyEffect: effect_id is nil.")
         return false
     end
     if not target.components.nikki_effect then
         target:AddComponent("nikki_effect")
+        target.components.nikki_effect._resolver = self.effect_resolver
     end
     return target.components.nikki_effect:Apply(effect_id, source)
 end
