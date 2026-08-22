@@ -7,7 +7,7 @@ local ModifierAdapter = require("adapters/modifier_adapter")
 -- ============================================================
 -- 内部辅助：资源速率处理
 -- ============================================================
-local function GetResourceRate(inst, id, def, context, layers, kind)
+local function GetResourceRate(inst, id, def, context, kind)
     local source = def[kind]
     local rate = source and source.rate or 0
     if type(rate) == "function" then
@@ -18,14 +18,14 @@ local function GetResourceRate(inst, id, def, context, layers, kind)
         end
         return result or 0
     end
-    return rate * layers
+    return rate * (context and context.layers or 1)
 end
 
-local function ApplyResourceRate(inst, id, def, context, layers, kind)
+local function ApplyResourceRate(inst, id, def, context, kind)
     local source = def[kind]
     if not source then return end
 
-    local rate = GetResourceRate(inst, id, def, context, layers, kind)
+    local rate = GetResourceRate(inst, id, def, context, kind)
     if context then
         context[kind .. "_rate"] = rate
     end
@@ -138,7 +138,10 @@ function NikkiEffect:_OnEffectStart(id, context)
         end
     end
     if def.on_apply then
-        pcall(def.on_apply, self.inst, context)
+        local ok, err = pcall(def.on_apply, self.inst, context)
+        if not ok then
+            log.error("[NikkiEffect] Error applying effect '%s' to %s: %s", id, tostring(self.inst), tostring(err))
+        end
     end
 end
 
@@ -159,11 +162,14 @@ function NikkiEffect:_OnEffectEnd(id, context)
     RemoveResourceRate(self.inst, id, def, context, "regen")
     RemoveResourceRate(self.inst, id, def, context, "drain")
     if def.on_remove then
-        pcall(def.on_remove, self.inst, context)
+        local ok, err = pcall(def.on_remove, self.inst, context)
+        if not ok then
+            log.error("[NikkiEffect] Error removing effect '%s' from %s: %s", id, tostring(self.inst), tostring(err))
+        end
     end
 end
 
-function NikkiEffect:_UpdateEffectLayers(id, layers, context)
+function NikkiEffect:_UpdateEffectLayers(id, context)
     local def = self:_GetDef(id)
     if not def then return end
 
@@ -172,15 +178,19 @@ function NikkiEffect:_UpdateEffectLayers(id, layers, context)
             ModifierAdapter.Apply(self.inst, mod_type, value, id)
         end
     end
-    ApplyResourceRate(self.inst, id, def, context, layers, "regen")
-    ApplyResourceRate(self.inst, id, def, context, layers, "drain")
+    ApplyResourceRate(self.inst, id, def, context, "regen")
+    ApplyResourceRate(self.inst, id, def, context, "drain")
 
     if type(def.on_layer_update) == "function" then
-        pcall(def.on_layer_update, self.inst, layers, context)
+        local ok, err = pcall(def.on_layer_update, self.inst, context)
+        if not ok then
+            log.error("[NikkiEffect] Error updating layers for effect '%s' on %s: %s", id, tostring(self.inst),
+                tostring(err))
+        end
     end
 end
 
-function NikkiEffect:_OnUpdateEffect(id, dt, context, layers)
+function NikkiEffect:_OnUpdateEffect(id, dt, context)
     local def = self:_GetDef(id)
     if not def then return false end
 
@@ -258,6 +268,7 @@ function NikkiEffect:Apply(id, source)
     if not resolver then return false end
 
     if self.inst.components.health and self.inst.components.health:IsDead() then
+        log.debug("[NikkiEffect] Cannot apply effect '%s' to %s because it is dead.", tostring(id), tostring(self.inst))
         return false
     end
 
@@ -276,7 +287,7 @@ function NikkiEffect:Apply(id, source)
         local def = resolver:GetDef(id)
         local context = {
             def = def,
-            layer = 1,
+            layers = 1,
             start_time = GetTime(),
             end_times = {},
             sources = self:_GetOrCreateSources(id),
@@ -301,7 +312,7 @@ function NikkiEffect:Apply(id, source)
         active = self._active_effects[id]
 
         self:_OnEffectStart(id, active.context)
-        self:_UpdateEffectLayers(id, 1, active.context)
+        self:_UpdateEffectLayers(id, active.context)
 
         if duration and duration > 0 then
             table.insert(active.context.end_times, GetTime() + duration)
@@ -309,11 +320,14 @@ function NikkiEffect:Apply(id, source)
                 self:Remove(id, false)
             end)
         end
+        log.debug("[NikkiEffect] Effect '%s' applied to %s with duration %.2f and max layers %d.", tostring(id),
+            tostring(self.inst), duration or 0, max or 1)
         return true
     end
 
     if mode == "toggle" then
         self:Remove(id, true, source)
+        log.debug("[NikkiEffect] Effect %s is already active on %s, toggling off.", tostring(id), tostring(self.inst))
         return true
     elseif mode == "ignore" then
         log.debug("[NikkiEffect] Effect %s is already active on %s, ignoring new application.", tostring(id),
@@ -334,8 +348,8 @@ function NikkiEffect:Apply(id, source)
     elseif mode == "add" then
         if active.layers < max then
             active.layers = active.layers + 1
-            active.context.layer = active.layers
-            self:_UpdateEffectLayers(id, active.layers, active.context)
+            active.context.layers = active.layers
+            self:_UpdateEffectLayers(id, active.context)
             if duration and duration > 0 then
                 table.insert(active.context.end_times, GetTime() + duration)
                 self._scheduler:Cancel(id)
@@ -381,8 +395,8 @@ function NikkiEffect:Remove(id, force_all, source)
         self:_ClearSources(id) -- 彻底结束时清理来源表
         log.debug("[NikkiEffect] Effect '%s' on %s fully removed.", tostring(id), tostring(self.inst))
     else
-        active.context.layer = active.layers
-        self:_UpdateEffectLayers(id, active.layers, active.context)
+        active.context.layers = active.layers
+        self:_UpdateEffectLayers(id, active.context)
         self._scheduler:Cancel(id)
         self:_ScheduleEffect(id)
         log.debug("[NikkiEffect] Effect '%s' on %s reduced to %d layers.", tostring(id), tostring(self.inst),
@@ -413,7 +427,7 @@ function NikkiEffect:OnUpdate(dt)
     end
 
     for id, active in pairs(self._active_effects) do
-        local should_keep = self:_OnUpdateEffect(id, dt, active.context, active.layers)
+        local should_keep = self:_OnUpdateEffect(id, dt, active.context)
         if not should_keep then
             self:Remove(id, true)
         end
