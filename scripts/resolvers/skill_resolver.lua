@@ -157,6 +157,7 @@ function SkillResolver:OnDefAdded(id, def)
     -- 轮盘相关配置
     if def.wheel then
         def.wheel.label = def.wheel.label or self:GetDisplayName(id)
+        def.wheel.widget_scale = def.wheel.widget_scale or 0.6
         local user_checkenabled = def.wheel.checkenabled
         if def.wheel.image then
             for k, v in pairs(def.wheel.image) do
