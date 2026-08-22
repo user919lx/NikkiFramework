@@ -723,6 +723,14 @@ function NikkiManager:OpenSkillWheel(inst)
     return true
 end
 
+function NikkiManager:ExecuteSkill(inst, skill_id, params)
+    local cmp_caster = inst.components.nikki_skill_caster
+    if cmp_caster then
+        return cmp_caster:Execute(skill_id, params)
+    end
+    return true
+end
+
 -- ============================================================
 -- 公开 API：效果
 -- ============================================================
@@ -802,7 +810,63 @@ function NikkiManager:ToggleSetting(key)
     return self._settings[key]
 end
 
--- ============================================================
+function NikkiManager:GetPlayerStatusSnapshot(inst)
+    -- local snapshot = {
+    --     state = { id = "unknown", name = "未知形态" },
+    --     effects = {}
+    -- }
+    -- if not inst then return snapshot end
+
+    -- -- 1. 获取当前形态 (兼容主客机)
+    -- local state_id = nil
+    -- if inst.components.nikki_state then
+    --     state_id = inst.components.nikki_state:GetState()
+    -- elseif inst.replica.nikki_state and inst.replica.nikki_state.GetState then
+    --     state_id = inst.replica.nikki_state:GetState()
+    -- end
+
+    -- if state_id then
+    --     snapshot.state.id = state_id
+    --     -- 尝试从 def 中获取名字，这里假设你的 state def 有 name 字段，没有则回退为 id
+    --     local def = self:GetStateDef(state_id)
+    --     snapshot.state.name = (def and def.name) or state_id
+    -- end
+
+    -- -- 2. 获取当前效果列表 (兼容主客机)
+    -- local active_effects = {}
+    -- if inst.components.nikki_effect then
+    --     -- 主机端直接读表
+    --     for id, data in pairs(inst.components.nikki_effect._active_effects) do
+    --         active_effects[id] = data.layers
+    --     end
+    -- elseif inst.replica.nikki_effect and inst.replica.nikki_effect.GetActiveEffects then
+    --     -- 客机端从网络同步组件获取（需要你后续在 replica 中实现同步）
+    --     active_effects = inst.replica.nikki_effect:GetActiveEffects()
+    -- end
+
+    -- for id, layers in pairs(active_effects) do
+    --     local def = self:GetEffectDef(id)
+    --     table.insert(snapshot.effects, {
+    --         id = id,
+    --         name = (def and def.name) or id, -- 尝试获取配置好的中文名
+    --         layers = layers
+    --     })
+    -- end
+
+    -- return snapshot
+
+    return {
+        state = {
+            id = "sparky",
+            name = "满电行动", -- 从 Def 获取到的本地化名称
+        },
+        effects = {
+            { id = "beam", name = "远光", layers = 2 },
+            { id = "brisk", name = "轻盈泡泡", layers = 1 },
+        }
+    }
+end
+
 -- 单例
 -- ============================================================
 local instance = nil
