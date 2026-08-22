@@ -43,7 +43,8 @@ local function HookCastAOEHandler(sg)
         -- 重写 deststate 函数
         old_handler.deststate = function(inst, action)
             local invobject = action.invobject
-            local nikki_aoe_state = invobject and invobject.prefab == "nikki_spell_caster" and invobject._nikki_aoe_state
+            local nikki_aoe_state = invobject and invobject.prefab == "nikki_spell_caster" and invobject
+                ._nikki_aoe_state
             if nikki_aoe_state ~= nil then
                 -- 如果是函数则执行，如果是字符串则直接返回
                 if type(nikki_aoe_state) == "function" then
@@ -300,6 +301,130 @@ end
 local default_config = require("defs/default_config")
 NikkiManager:RegisterMod(default_config, env)
 
+
 if not is_debug_mode then
     return
 end
+
+-- 实验性功能 未实装
+AddClassPostConstruct("screens/playerinfopopupscreen", function(self)
+    if self.owner and self.owner:HasTag("nikki_framework") then
+        local Widget = require("widgets/widget")
+        local ImageButton = require("widgets/imagebutton")
+
+        local function MakeTabBtn(tabs_widget, pos, text, clickfn, flip)
+            local btn = tabs_widget:AddChild(ImageButton("images/skilltree.xml",
+                "tab_skills_unselected.tex", "tab_skills_unselected.tex", "tab_skills_over.tex",
+                "tab_skills_unselected.tex", "tab_skills_over.tex"
+            ))
+            local size = { 142, 96 }
+            if flip then size[1] = size[1] * -1 end
+            btn:SetPosition(pos[1], pos[2])
+            btn:ForceImageSize(size[1], size[2])
+            btn:SetText(text)
+            btn:SetTextSize(20)
+            btn:SetFont(GLOBAL.HEADERFONT)
+            btn:SetDisabledFont(GLOBAL.HEADERFONT)
+            btn:SetTextColour(GLOBAL.UICOLOURS.GOLD)
+            btn.scale_on_focus = false
+            btn.clickoffset = GLOBAL.Vector3(0, 5, 0)
+            btn:SetTextFocusColour(GLOBAL.UICOLOURS.GOLD)
+            btn:SetTextSelectedColour(GLOBAL.UICOLOURS.GOLD)
+            btn:SetTextDisabledColour(GLOBAL.UICOLOURS.GOLD)
+            btn.text:SetPosition(flip and 2 or -2, -5)
+            btn:SetOnClick(clickfn)
+            return btn
+        end
+
+        -- 1. 自定义面板生成方法
+        self.MakeNikkiStatus = function(self)
+            if self.playeravatar then
+                self.playeravatar:Kill()
+                self.playeravatar = nil
+            end
+            if self.skilltree then
+                self.skilltree:Kill()
+                self.skilltree = nil
+            end
+
+            if not self.nikkistatus then
+                local NikkiStatus = require("widgets/nikki_status")
+
+                -- ===================================================
+                -- 【核心改变】由 Screen 负责调用 Manager 获取数据切片
+                -- ===================================================
+                local status_data = NikkiManager:GetPlayerStatusSnapshot(self.data.inst)
+                -- 将数据直接注入 Widget
+                self.nikkistatus = self.root:AddChild(NikkiStatus(status_data))
+                self.nikkistatus:SetPosition(0, -50)
+            end
+
+            if self.root.tabs then
+                if self.root.tabs.playerAvatarPopup then self.root.tabs.playerAvatarPopup:Enable() end
+                if self.root.tabs.skillTreePopup then self.root.tabs.skillTreePopup:Enable() end
+                if self.root.tabs.nikkiStatusPopup then self.root.tabs.nikkiStatusPopup:Disable() end
+            end
+        end
+
+        -- 2. 构建或重排 Tabs
+        if not self.root.tabs then
+            self.root.tabs = self.root:AddChild(Widget("tabs"))
+            self.root.tabs:SetPosition(0, 0)
+
+            local avatar_str = GLOBAL.STRINGS.SKILLTREE and GLOBAL.STRINGS.SKILLTREE.INFOPANEL or "玩家信息"
+            self.root.tabs.playerAvatarPopup = MakeTabBtn(self.root.tabs, { -165, 220 }, avatar_str,
+                function() self:MakePlayerAvatarPopup() end, true)
+            self.root.tabs.nikkiStatusPopup = MakeTabBtn(self.root.tabs, { 165, 220 }, "状态效果",
+                function() self:MakeNikkiStatus() end, false)
+
+            self.root.tabs.playerAvatarPopup:Disable()
+        else
+            if self.root.tabs.playerAvatarPopup then self.root.tabs.playerAvatarPopup:SetPosition(-200, 220) end
+            if self.root.tabs.skillTreePopup then self.root.tabs.skillTreePopup:SetPosition(0, 220) end
+            self.root.tabs.nikkiStatusPopup = MakeTabBtn(self.root.tabs, { 200, 220 }, "状态效果",
+                function() self:MakeNikkiStatus() end, false)
+
+            if self.MakeSkillTree then
+                local _MakeSkillTree = self.MakeSkillTree
+                self.MakeSkillTree = function(self)
+                    if self.nikkistatus then
+                        self.nikkistatus:Kill()
+                        self.nikkistatus = nil
+                    end
+                    _MakeSkillTree(self)
+                    if self.root.tabs and self.root.tabs.nikkiStatusPopup then
+                        self.root.tabs.nikkiStatusPopup:Enable()
+                    end
+                end
+            end
+        end
+
+        -- 3. 重新对齐图层渲染层级
+        if self.root.tabs then
+            self.root.tabs:MoveToBack()
+            if self.root.bg then
+                self.root.bg:MoveToBack()
+            end
+        end
+
+        -- 4. 拦截玩家头像面板刷新
+        local _MakePlayerAvatarPopup = self.MakePlayerAvatarPopup
+        self.MakePlayerAvatarPopup = function(self)
+            if self.nikkistatus then
+                self.nikkistatus:Kill()
+                self.nikkistatus = nil
+            end
+
+            local temp_tabs = self.root.tabs
+            self.root.tabs = nil
+            _MakePlayerAvatarPopup(self)
+            self.root.tabs = temp_tabs
+
+            if self.root.tabs then
+                if self.root.tabs.playerAvatarPopup then self.root.tabs.playerAvatarPopup:Disable() end
+                if self.root.tabs.skillTreePopup then self.root.tabs.skillTreePopup:Enable() end
+                if self.root.tabs.nikkiStatusPopup then self.root.tabs.nikkiStatusPopup:Enable() end
+            end
+        end
+    end
+end)
