@@ -760,23 +760,29 @@ end
 -- ============================================================
 -- 公开 API：效果
 -- ============================================================
-function NikkiManager:ApplyEffect(inst, effect_id, source)
-    source = source or "dynamic"
-    if not inst or not inst.components.nikki_effect then
-        log.warn("[NikkiManager] ApplyEffect: inst has no nikki_effect component.")
+function NikkiManager:ApplyEffect(target, effect_id, source)
+    if not target then
+        log.warn("[NikkiManager] ApplyEffect: target is nil.")
         return false
     end
-    return inst.components.nikki_effect:Apply(effect_id, source)
+    if not effect_id then
+        log.warn("[NikkiManager] ApplyEffect: effect_id is nil.")
+        return false
+    end
+    if not target.components.nikki_effect then
+        target:AddComponent("nikki_effect")
+    end
+    return target.components.nikki_effect:Apply(effect_id, source)
 end
 
-function NikkiManager:RemoveEffect(inst, effect_id, force_all)
-    if not inst or not inst.components.nikki_effect then return false end
-    return inst.components.nikki_effect:Remove(effect_id, force_all or true)
+function NikkiManager:RemoveEffect(target, effect_id, force_all)
+    if not target or not target.components.nikki_effect then return false end
+    return target.components.nikki_effect:Remove(effect_id, force_all or true)
 end
 
-function NikkiManager:HasEffect(inst, effect_id)
-    if not inst or not inst.components.nikki_effect then return false end
-    return inst.components.nikki_effect:HasEffect(effect_id)
+function NikkiManager:HasEffect(target, effect_id)
+    if not target or not target.components.nikki_effect then return false end
+    return target.components.nikki_effect:HasEffect(effect_id)
 end
 
 -- ============================================================

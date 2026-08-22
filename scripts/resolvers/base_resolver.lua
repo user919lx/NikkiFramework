@@ -30,6 +30,15 @@ function BaseResolver:GetDef(id)
     return self.defs[id]
 end
 
+function BaseResolver:GetDefCopy(id)
+    local def = self.defs[id]
+    if not def then
+        return nil
+    else
+        return deepcopy(def)
+    end
+end
+
 -- 获取所有数据字典
 function BaseResolver:GetAllDefs()
     return self.defs

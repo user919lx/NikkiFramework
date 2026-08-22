@@ -8,7 +8,7 @@ require("strings/nikki_framework")
 PrefabFiles = {
     "nikki_spell_caster",
     "nikki_range_indicator",
-    "nikki_aura_fx",
+    "nikki_aura",
     "nikki_reticule"
 }
 AddReplicableComponent("nikki_skill_trigger")
