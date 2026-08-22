@@ -1,4 +1,3 @@
--- scripts/components/nikki_aura.lua
 local log = require("utils/log")
 
 local NikkiAura = Class(function(self, inst)
@@ -20,6 +19,7 @@ local NikkiAura = Class(function(self, inst)
             self._task:Cancel()
             self._task = nil
         end
+        log.debug("[NikkiAura] Aura component removed, cleared all targets and canceled pulse task.")
     end)
 end)
 
@@ -28,7 +28,6 @@ end)
 -- ============================================================
 local function AddAuraTarget(target, effect_id, owner)
     if not target or not target:IsValid() or not effect_id then return end
-
     target._nikki_aura_counts = target._nikki_aura_counts or {}
     local count = target._nikki_aura_counts[effect_id] or 0
     -- 只有第一次进入同类光环覆盖区时，才真正施加 Effect
@@ -46,7 +45,6 @@ local function RemoveAuraTarget(target, effect_id)
     local count = target._nikki_aura_counts[effect_id] - 1
     if count <= 0 then
         target._nikki_aura_counts[effect_id] = nil
-        -- 所有同类光环均已离开，彻底移除 Effect
         NikkiManager:RemoveEffect(target, effect_id)
     else
         target._nikki_aura_counts[effect_id] = count
@@ -73,15 +71,18 @@ local function FindTargets(self)
             end
         end
     end
-
     return targets_map
 end
 
 function NikkiAura:OnPulse()
-    if not self.effect_id then return end
+    if not self.effect_id then
+        log.error("[NikkiAura] No effect_id set for aura, skipping pulse.", self.inst)
+        return
+    end
 
     if self.owner and not self.owner:IsValid() then
         self.inst:Remove()
+        log.error("[NikkiAura] Owner is invalid, removing aura entity.", self.inst)
         return
     end
 
