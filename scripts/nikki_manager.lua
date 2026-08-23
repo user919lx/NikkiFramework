@@ -250,13 +250,17 @@ function NikkiManager:_LoadDefs(config)
                         def.toggle = nil
                     end
 
-                    local processed_def, triggers, sub_skills = self:_ProcessDefaultTriggers(skill_id, def)
-                    all_skills[skill_id] = processed_def
-                    if triggers and next(triggers) then
-                        trigger_data[skill_id] = triggers
+                    -- 在 NikkiManager:_LoadDefs 的 Skill 循环里替换为：
+                    local new_skills, new_triggers = self:_ProcessDefaultTriggers(skill_id, def)
+
+                    -- 无差别合并所有生成的技能 (母技能 + 子技能)
+                    for sid, sdef in pairs(new_skills) do
+                        all_skills[sid] = sdef
                     end
-                    for sub_id, sub_def in pairs(sub_skills) do
-                        all_skills[sub_id] = sub_def
+
+                    -- 无差别合并所有生成的触发器
+                    for sid, trigs in pairs(new_triggers) do
+                        trigger_data[sid] = trigs
                     end
                 end
             end
@@ -489,51 +493,67 @@ function NikkiManager:_ProcessToggle(skill_id, def)
 end
 
 -- ============================================================
--- _ProcessDefaultTriggers：处理单个技能的 default_triggers
+-- _ProcessDefaultTriggers：处理 default_triggers 并彻底展平
 -- ============================================================
 function NikkiManager:_ProcessDefaultTriggers(skill_id, def)
-    local processed_def = {}
-    local triggers = {}
-    local sub_skills = {}
+    local skills_to_add = {}
+    local triggers_to_add = {}
 
+    -- 1. 先把母技能存进去
+    local processed_def = {}
     for k, v in pairs(def) do
         if k ~= "default_triggers" then
             processed_def[k] = v
         end
     end
+    skills_to_add[skill_id] = processed_def
 
     local default_triggers = def.default_triggers
     if not default_triggers then
-        return processed_def, nil, {}
+        return skills_to_add, triggers_to_add
     end
 
     local trigger_types = { "events", "actions" }
     local sub_skill_list = {}
+    local parent_triggers = {}
 
+    -- 2. 解析触发器，生成平级的子技能和触发器映射
     for _, trigger_type in ipairs(trigger_types) do
         local trigger_map = default_triggers[trigger_type]
         if trigger_map then
             for trigger_key, trigger_value in pairs(trigger_map) do
-                if not triggers[trigger_type] then
-                    triggers[trigger_type] = {}
-                end
-                table.insert(triggers[trigger_type], trigger_key)
-
-                if trigger_value ~= true then
+                if trigger_value == true then
+                    -- 触发器归属母技能
+                    if not parent_triggers[trigger_type] then
+                        parent_triggers[trigger_type] = {}
+                    end
+                    table.insert(parent_triggers[trigger_type], trigger_key)
+                else
+                    -- 生成子技能及其触发器
                     local sub_skill_id = GenerateSubSkillId(skill_id, trigger_type, trigger_key)
                     local sub_def = self:_BuildSubSkillDef(skill_id, def, trigger_value)
-                    sub_skills[sub_skill_id] = sub_def
+
                     table.insert(sub_skill_list, sub_skill_id)
+                    skills_to_add[sub_skill_id] = sub_def
+                    triggers_to_add[sub_skill_id] = {
+                        [trigger_type] = { trigger_key }
+                    }
                 end
             end
         end
     end
 
+    -- 3. 如果母技能有需要绑定的触发器，也平级存进去
+    if next(parent_triggers) then
+        triggers_to_add[skill_id] = parent_triggers
+    end
+
+    -- 记录树形结构，方便 AddSkills 时能递归找到子技能
     if #sub_skill_list > 0 then
         processed_def._sub_skills = sub_skill_list
     end
 
-    return processed_def, triggers, sub_skills
+    return skills_to_add, triggers_to_add
 end
 
 -- ============================================================

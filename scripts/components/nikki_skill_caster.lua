@@ -348,6 +348,7 @@ function NikkiSkillCaster:Execute(skill_id, params)
     if def.fn then
         local success, result, err = pcall(def.fn, self.inst, params, def)
         if not success or result == false then
+            log.debug("[NikkiSkillCaster] Skill '%s' execution failed: %s", tostring(skill_id), tostring(err))
             return false, err or "EXECUTION_REJECTED"
         end
     end
