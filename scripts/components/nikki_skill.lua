@@ -95,13 +95,13 @@ function NikkiSkill:_AddSkillsInternal(ids)
     if not ids then return end
     local resolver = self:_GetResolver()
     local trigger_resolver = self:_GetTriggerResolver()
-
     for _, id in ipairs(ids) do
         if not self:IsAdded(id) then
-            self:_OnSkillAdd(id)
+            -- 1. 标记状态
             self._active_skills[id] = true
-            log.debug("[NikkiSkill] Added skill '%s' to %s.", tostring(id), tostring(self.inst))
-
+            -- 2. 装配主技能逻辑（Tag、Effect、on_add）
+            self:_OnSkillAdd(id)
+            -- 3. 装配触发器
             if trigger_resolver then
                 local triggers = trigger_resolver:GetTriggers(id)
                 if triggers and next(triggers) then
@@ -115,10 +115,13 @@ function NikkiSkill:_AddSkillsInternal(ids)
                     end
                 end
             end
+            -- 4. 递归装配子技能
             local def = resolver and resolver:GetDef(id)
             if def and def._sub_skills then
                 self:_AddSkillsInternal(def._sub_skills)
             end
+            -- 5. 一切安好，打上成功日志
+            log.debug("[NikkiSkill] Added skill '%s' to %s.", tostring(id), tostring(self.inst))
         end
     end
 end
@@ -129,11 +132,11 @@ function NikkiSkill:_RemoveSkillsInternal(ids)
         if self:IsAdded(id) then
             local resolver = self:_GetResolver()
             local def = resolver and resolver:GetDef(id)
-
+            -- 1. 【核心修正：后进先出】先递归卸载子技能，保证子技能卸载时依然能享受父技能的环境
             if def and def._sub_skills then
                 self:_RemoveSkillsInternal(def._sub_skills)
             end
-
+            -- 2. 卸载触发器
             local trigger_resolver = self:_GetTriggerResolver()
             if trigger_resolver then
                 local triggers = trigger_resolver:GetTriggers(id)
@@ -148,9 +151,16 @@ function NikkiSkill:_RemoveSkillsInternal(ids)
                     end
                 end
             end
+            -- 3. 卸载主技能逻辑（Tag、Effect、on_remove）
             self:_OnSkillRemove(id)
+            -- 4. 清理状态与冷却
             self._active_skills[id] = nil
             self._cooldowns[id] = nil
+            if self.inst.components.spellbookcooldowns then
+                self.inst.components.spellbookcooldowns:StopSpellCooldown(id)
+            end
+            -- 5. 安全着陆，打上卸载成功日志
+            log.debug("[NikkiSkill] Removed skill '%s' from %s.", tostring(id), tostring(self.inst))
         end
     end
 end
@@ -235,6 +245,14 @@ end
 function NikkiSkill:GetSkillName(id)
     local resolver = self:_GetResolver()
     return resolver and resolver:GetDisplayName(id)
+end
+
+function NikkiSkill:Clear()
+    local ids_to_remove = self:GetActiveSkills()
+    if #ids_to_remove > 0 then
+        self:RemoveSkills(ids_to_remove)
+    end
+    self._cooldowns = {}
 end
 
 return NikkiSkill

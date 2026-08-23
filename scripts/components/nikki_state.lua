@@ -21,7 +21,7 @@ local NikkiState = Class(function(self, inst)
         state = on_state
     })
 
-function NikkiState:ClearState()
+function NikkiState:Clear()
     self.state = nil
     self:ApplyStateDef(nil)
 end

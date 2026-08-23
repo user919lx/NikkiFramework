@@ -308,7 +308,7 @@ function NikkiEffect:Apply(id, source)
                 self:Remove(id, false)
             end)
         end
-        log.debug("[NikkiEffect] Effect '%s' applied to %s with duration %.2f and max layers %d.", tostring(id),
+        log.debug("[NikkiEffect] Apply effect '%s' to %s with duration %.2f and max layers %d.", tostring(id),
             tostring(self.inst), duration or 0, max or 1)
         return true
     end
@@ -380,13 +380,13 @@ function NikkiEffect:Remove(id, force_all, source)
         self:_OnEffectEnd(id, active.context)
         self._active_effects[id] = nil
         self:_ClearSources(id)
-        log.debug("[NikkiEffect] Effect '%s' on %s fully removed.", tostring(id), tostring(self.inst))
+        log.debug("[NikkiEffect] Remove effect '%s' fully on %s.", tostring(id), tostring(self.inst))
     else
         active.context.layers = active.layers
         self:_UpdateEffectLayers(id, active.context)
         self._scheduler:Cancel(id)
         self:_ScheduleEffect(id)
-        log.debug("[NikkiEffect] Effect '%s' on %s reduced to %d layers.", tostring(id), tostring(self.inst),
+        log.debug("[NikkiEffect] Reduced effect '%s' on %s to %d layers.", tostring(id), tostring(self.inst),
             active.layers)
     end
 end

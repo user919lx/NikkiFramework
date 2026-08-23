@@ -305,12 +305,12 @@ end
 function NikkiSkillCaster:Execute(skill_id, params)
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return false, "NO_MANAGER" end
+    local def = skill_manager:GetSkillDef(skill_id)
+    if not def then return false, "SKILL_NOT_FOUND" end
 
     if not skill_manager:IsAdded(skill_id) then return false, "NOT_ADDED" end
     if skill_manager:IsOnCooldown(skill_id) then return false, "ON_COOLDOWN" end
 
-    local def = skill_manager:GetSkillDef(skill_id)
-    if not def then return false, "SKILL_NOT_FOUND" end
 
     if def.required_tags then
         for _, tag in ipairs(def.required_tags) do
@@ -320,13 +320,18 @@ function NikkiSkillCaster:Execute(skill_id, params)
 
     if def.cost and def.cost.res and def.cost.amount and def.cost.amount > 0 then
         local current = ResourceAdapter.GetCurrent(self.inst, def.cost.res)
-        if current < def.cost.amount then return false, "NOT_ENOUGH_RESOURCE" end
+        if current < def.cost.amount then
+            local reason = string.upper(def.cost.res) .. "_NOT_ENOUGH"
+            log.debug("[NikkiSkillCaster] Not enough resource for skill '%s': %s (required: %d, current: %d)",
+            tostring(skill_id), reason, def.cost.amount, current)
+            return false, reason
+        end
     end
 
     if def.fn then
         local success, result, err = pcall(def.fn, self.inst, params, def)
         if not success or result == false then
-            log.debug("[NikkiSkillCaster] Skill '%s' execution failed: %s", tostring(skill_id), tostring(err))
+            log.debug("[NikkiSkillCaster] Execute skill '%s' failed: %s", tostring(skill_id), tostring(err))
             return false, err or "EXECUTION_REJECTED"
         end
     end

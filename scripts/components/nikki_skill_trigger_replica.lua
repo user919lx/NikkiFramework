@@ -31,5 +31,7 @@ function NikkiSkillTrigger:CastKey(key)
     end
     return false
 end
-
+function NikkiSkillTrigger:Clear()
+    self._keys = {}
+end
 return NikkiSkillTrigger

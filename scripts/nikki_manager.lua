@@ -1,3 +1,4 @@
+-- scripts/nikki_manager.lua
 local log = require("utils/log")
 local EffectResolver = require("resolvers/effect_resolver")
 local SkillResolver = require("resolvers/skill_resolver")
@@ -479,27 +480,19 @@ end
 
 function NikkiManager:_BuildSubSkillDef(skill_id, parent_def, trigger_value)
     local sub_def = {}
-
+    setmetatable(sub_def, { __index = parent_def })
     if type(trigger_value) == "function" then
         trigger_value = { fn = trigger_value }
     end
-
-    if type(trigger_value) == "table" then
-        if trigger_value.fn ~= nil then
-            sub_def.fn = trigger_value.fn
-            if trigger_value.cost then sub_def.cost = trigger_value.cost end
-            if trigger_value.cd then sub_def.cd = trigger_value.cd end
-            if trigger_value.required_tags then sub_def.required_tags = trigger_value.required_tags end
-        else
-            sub_def.fn = parent_def.fn
-            sub_def.cost = trigger_value.cost or parent_def.cost
-            sub_def.cd = trigger_value.cd or parent_def.cd
-            sub_def.required_tags = trigger_value.required_tags or parent_def.required_tags
+    if type(trigger_value) == "function" then
+        sub_def.fn = trigger_value
+    elseif type(trigger_value) == "table" then
+        for k, v in pairs(trigger_value) do
+            sub_def[k] = v
         end
     else
         log.error("[NikkiManager] Invalid trigger_value type for skill '%s': %s", skill_id, type(trigger_value))
     end
-
     return sub_def
 end
 
@@ -526,15 +519,23 @@ function NikkiManager:_SaveSettings()
     end
 end
 
+-- ============================================================
+-- 装配分发
+-- ============================================================
 function NikkiManager:_ApplyTo(config, mod_env)
     local apply_to = config.apply_to or {}
     local custom_resources = config.custom_resources
     for tier_name, tier_cfg in pairs(apply_to) do
         if type(tier_cfg) == "table" then
+            local initial_cfg = tier_cfg.initial
             if type(tier_cfg.prefabs) == "table" then
                 for _, prefab in ipairs(tier_cfg.prefabs) do
                     mod_env.AddPrefabPostInit(prefab, function(inst)
                         self:ApplyFrameworkToInst(inst, tier_name, custom_resources)
+                        if initial_cfg then
+                            inst._nikki_initial = initial_cfg
+                            self:ApplyInitial(inst, initial_cfg)
+                        end
                     end)
                 end
             end
@@ -543,6 +544,10 @@ function NikkiManager:_ApplyTo(config, mod_env)
                 mod_env.AddPrefabPostInitAny(function(inst)
                     if inst.HasTag and inst:HasTag(tag_name) then
                         self:ApplyFrameworkToInst(inst, tier_name, custom_resources)
+                        if initial_cfg then
+                            inst._nikki_initial = initial_cfg
+                            self:ApplyInitial(inst, initial_cfg)
+                        end
                     end
                 end)
             end
@@ -594,6 +599,104 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
     if not inst.components.nikki_skill_trigger then inst:AddComponent("nikki_skill_trigger") end
     if not inst.components.nikki_skill_caster then inst:AddComponent("nikki_skill_caster") end
     if not inst.components.nikki_state then inst:AddComponent("nikki_state") end
+end
+
+-- ============================================================
+-- 公开门面 API：初始状态与一键清理
+-- ============================================================
+--- 为实体应用初始配置（供内部与外部开发者直接调用）
+function NikkiManager:ApplyInitial(inst, initial_cfg)
+    log.debug("[NikkiManager] Applying initial config to %s: %s", tostring(inst), tostring(initial_cfg))
+    if not inst or not initial_cfg then return false end
+    -- 1. 初始技能
+    if initial_cfg.skills and type(initial_cfg.skills) == "table" and inst.components.nikki_skill then
+        log.debug("[NikkiManager] Adding initial skills to %s: %s", tostring(inst), tostring(initial_cfg.skills))
+        inst.components.nikki_skill:AddSkills(initial_cfg.skills)
+    end
+    -- 2. 初始形态
+    if initial_cfg.state and type(initial_cfg.state) == "string" and inst.components.nikki_state then
+        log.debug("[NikkiManager] Setting initial state for %s: %s", tostring(inst), tostring(initial_cfg.state))
+        inst.components.nikki_state:SetState(initial_cfg.state)
+    end
+    -- 3. 初始效果
+    if initial_cfg.effects and type(initial_cfg.effects) == "table" and inst.components.nikki_effect then
+        log.debug("[NikkiManager] Applying initial effects to %s: %s", tostring(inst), tostring(initial_cfg.effects))
+        for _, effect_id in ipairs(initial_cfg.effects) do
+            self:ApplyEffect(inst, effect_id, inst)
+        end
+    end
+    -- 4. 初始按键绑定
+    if initial_cfg.keys and type(initial_cfg.keys) == "table" then
+        local parsed_keys = {}
+        -- 单次循环：解析键码、缓存结果、并立刻给服务端组件装配
+        for k, skill_id in pairs(initial_cfg.keys) do
+            local key_code = type(k) == "string" and rawget(_G, k) or k
+            parsed_keys[key_code] = skill_id
+            if inst.components.nikki_skill_trigger then
+                inst.components.nikki_skill_trigger:Add("keys", key_code, skill_id)
+            end
+        end
+        -- 抽离 Replica 装配闭包
+        local function add_keys_to_replica(_inst, keys)
+            for key_code, skill_id in pairs(keys) do
+                _inst.replica.nikki_skill_trigger:AddKey(key_code, skill_id)
+            end
+        end
+        -- 鸭子判定与短轮询兜底
+        if inst.replica and inst.replica.nikki_skill_trigger then
+            add_keys_to_replica(inst, parsed_keys)
+        else
+            local max_retries = 20
+            local retries = 0
+            local task
+            task = inst:DoPeriodicTask(0.1, function(_inst)
+                -- 2. 闭包内部捕获外部的 retry_task
+                if not _inst:IsValid() then
+                    if task then
+                        task:Cancel()
+                        task = nil
+                    end
+                    return
+                end
+
+                if _inst.replica and _inst.replica.nikki_skill_trigger then
+                    add_keys_to_replica(_inst, parsed_keys)
+                    if task then
+                        task:Cancel()
+                        task = nil
+                    end
+                else
+                    retries = retries + 1
+                    if retries >= max_retries then
+                        if task then
+                            task:Cancel()
+                            task = nil
+                        end
+                    end
+                end
+            end)
+        end
+    end
+    return true
+end
+
+--- 一键清空实体上所有框架提供的状态、技能和效果
+function NikkiManager:ClearAll(inst)
+    if not inst or not inst:IsValid() then return false end
+    if inst.components.nikki_effect then inst.components.nikki_effect:Clear() end
+    if inst.components.nikki_state then inst.components.nikki_state:Clear() end
+    if inst.replica and inst.replica.nikki_skill_trigger then inst.replica.nikki_skill_trigger:Clear() end
+    if inst.components.nikki_skill_trigger then inst.components.nikki_skill_trigger:Clear() end
+    if inst.components.nikki_skill then inst.components.nikki_skill:Clear() end
+    return true
+end
+
+--- 将实体还原到装配时的预设状态
+function NikkiManager:ResetToInitial(inst)
+    if not inst or not inst._nikki_initial then return false end
+    self:ClearAll(inst)
+    self:ApplyInitial(inst, inst._nikki_initial)
+    return true
 end
 
 -- ============================================================
