@@ -1,9 +1,8 @@
 local log = require("utils/log")
--- ============================================================
--- 内部辅助：统一回调派发
--- ============================================================
+local NikkiManager = require("nikki_manager")
+
 local function DispatchCallback(fn, owner, targets, aura_inst, custom_params)
-    if not fn or #targets == 0 then return end
+    if not fn or not targets or #targets == 0 then return end
     local params = {}
     if custom_params then
         for k, v in pairs(custom_params) do
@@ -14,7 +13,7 @@ local function DispatchCallback(fn, owner, targets, aura_inst, custom_params)
     params.aura = aura_inst
     local ok, err = pcall(fn, owner, params)
     if not ok then
-        log.error("[NikkiAura] Error in callback function. %s", tostring(err))
+        log.error("[NikkiAura] Error in callback function: %s", tostring(err))
     end
 end
 
@@ -29,14 +28,12 @@ local NikkiAura = Class(function(self, inst)
     self.effect_id = nil
     self.params = nil
 
-    -- 生命周期钩子: fn(inst, params)
-    -- params 结构: { targets = table, aura = EntityScript, ... }
     self.on_enter = nil
     self.on_pulse = nil
     self.on_exit = nil
 
     self._task = nil
-    self._current_targets = {} -- table<EntityScript, boolean>
+    self._current_targets = {}
 
     self.inst:ListenForEvent("onremove", function()
         self:ClearAllTargets()
@@ -48,15 +45,12 @@ local NikkiAura = Class(function(self, inst)
     end)
 end)
 
--- ============================================================
--- 内部辅助：效果施加与移除 (带重叠计数保护)
--- ============================================================
 function NikkiAura:_ApplyEffect(target)
     if not self.effect_id or not target or not target:IsValid() then return end
     target._nikki_aura_counts = target._nikki_aura_counts or {}
     local count = target._nikki_aura_counts[self.effect_id] or 0
     if count == 0 then
-        NikkiManager:ApplyEffect(target, self.effect_id, self.owner or self.inst)
+        NikkiManager.GetInstance():ApplyEffect(target, self.effect_id, self.owner or self.inst)
     end
     target._nikki_aura_counts[self.effect_id] = count + 1
 end
@@ -69,15 +63,12 @@ function NikkiAura:_RemoveEffect(target)
     local count = target._nikki_aura_counts[self.effect_id] - 1
     if count <= 0 then
         target._nikki_aura_counts[self.effect_id] = nil
-        NikkiManager:RemoveEffect(target, self.effect_id)
+        NikkiManager.GetInstance():RemoveEffect(target, self.effect_id)
     else
         target._nikki_aura_counts[self.effect_id] = count
     end
 end
 
--- ============================================================
--- 空间检测与周期处理
--- ============================================================
 function NikkiAura:_FindTargets()
     local x, y, z = self.inst.Transform:GetWorldPosition()
 
@@ -98,9 +89,6 @@ function NikkiAura:_FindTargets()
     return targets_map
 end
 
--- ============================================================
--- 生命周期统一管线 (Effect 挂卸载 + 用户自定义回调)
--- ============================================================
 function NikkiAura:_OnEnter(targets)
     if not targets or #targets == 0 then return end
     for _, target in ipairs(targets) do
@@ -119,9 +107,12 @@ function NikkiAura:_OnExit(targets)
     DispatchCallback(self.on_exit, owner, targets, self.inst, self.params)
 end
 
--- ============================================================
--- 空间检测与周期驱动
--- ============================================================
+function NikkiAura:_OnPulse(targets)
+    if not targets or #targets == 0 then return end
+    local owner = (self.owner and self.owner:IsValid()) and self.owner or self.inst
+    DispatchCallback(self.on_pulse, owner, targets, self.inst, self.params)
+end
+
 function NikkiAura:OnPulse()
     if self.owner and not self.owner:IsValid() then
         self.inst:Remove()
@@ -134,14 +125,12 @@ function NikkiAura:OnPulse()
     local exited_targets = {}
     local current_active_targets = {}
 
-    -- 1. 离开检测 (当前已记录但新扫描中不存在)
     for target, _ in pairs(self._current_targets) do
         if not new_targets[target] then
             table.insert(exited_targets, target)
         end
     end
 
-    -- 2. 进入检测与活跃列表收集
     for target, _ in pairs(new_targets) do
         if not self._current_targets[target] then
             table.insert(entered_targets, target)
@@ -151,15 +140,11 @@ function NikkiAura:OnPulse()
 
     self._current_targets = new_targets
 
-    -- 3. 触发统一生命周期管线
     self:_OnExit(exited_targets)
     self:_OnEnter(entered_targets)
     self:_OnPulse(current_active_targets)
 end
 
--- ============================================================
--- 配置与控制接口
--- ============================================================
 function NikkiAura:Setup(cfg)
     if not cfg then return end
 

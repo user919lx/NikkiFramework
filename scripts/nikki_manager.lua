@@ -1,4 +1,3 @@
--- scripts/nikki_manager.lua
 local log = require("utils/log")
 local EffectResolver = require("resolvers/effect_resolver")
 local SkillResolver = require("resolvers/skill_resolver")
@@ -21,14 +20,10 @@ end
 
 local function MakeClickOverride(is_right_click)
     return function(inst, target, pos)
-        if not inst then
-            return {}, true
-        end
-
+        if not inst then return {}, true end
         local cmp_caster = inst.components.nikki_skill_caster
-        if not cmp_caster then
-            return {}, true
-        end
+        if not cmp_caster then return {}, true end
+
         local actions = {}
         local act = cmp_caster:GetAvailableSkillAction(target, pos, is_right_click)
         if act then
@@ -43,15 +38,11 @@ local function MakeClickOverride(is_right_click)
     end
 end
 
-
 -- ============================================================
 -- 统一管理器（全局单例）
 -- ============================================================
 local NikkiManager = Class(function(self)
-    self.effect_resolver = nil
-    self.skill_resolver = nil
-    self.state_resolver = nil
-    self.trigger_resolver = nil
+    self.resolvers = {}
 
     self._settings_file = "nikki_framework_settings"
     self._settings = {
@@ -63,9 +54,6 @@ local NikkiManager = Class(function(self)
     self._hooks_installed = false
 end)
 
--- ============================================================
--- 初始化框架
--- ============================================================
 function NikkiManager:Init(env)
     if self._is_initialized then
         log.warn("[NikkiManager] Already initialized. Skipping.")
@@ -80,9 +68,6 @@ function NikkiManager:Init(env)
     log.info("[NikkiManager] Framework initialized.")
 end
 
--- ============================================================
--- 注册 Mod 配置
--- ============================================================
 function NikkiManager:RegisterMod(config, mod_env)
     if not self._is_initialized then
         log.error("[NikkiManager] RegisterMod: Framework not initialized.")
@@ -99,32 +84,26 @@ function NikkiManager:RegisterMod(config, mod_env)
 
     self:_RegisterExtensions(config, mod_env)
     self:_LoadDefs(config)
-    -- 加载传统框架资源（配方、动作、SG、图集）—— 路径位于 defs 下
     self:_LoadFrameworkResources(config, mod_env)
     self:_ApplyTo(config, mod_env)
     log.info("[NikkiManager] Mod %s registered.", tostring(mod_env.modname))
 end
 
--- ============================================================
--- 私有方法
--- ============================================================
 function NikkiManager:_CreateResolvers()
-    self.effect_resolver = EffectResolver()
-    self.skill_resolver = SkillResolver()
-    self.state_resolver = StateResolver()
-    self.trigger_resolver = TriggerResolver()
+    self.resolvers = {
+        effect = EffectResolver(),
+        skill = SkillResolver(),
+        state = StateResolver(),
+        trigger = TriggerResolver(),
+    }
 end
 
--- ============================================================
--- 安装劫持
--- ============================================================
 function NikkiManager:_InstallTriggerHooks(env)
     if self._hooks_installed then
         log.warn("[NikkiManager] Trigger hooks already installed.")
         return
     end
 
-    -- Action 劫持：拦截 BufferedAction:Do
     local _old_Do = BufferedAction.Do
     ---@diagnostic disable-next-line: duplicate-set-field
     BufferedAction.Do = function(self)
@@ -146,7 +125,6 @@ function NikkiManager:_InstallTriggerHooks(env)
         return origin_result, origin_reason
     end
 
-    -- Event 劫持：拦截 PushEvent / PushEventImmediate
     local event_depth = 0
     local MAX_EVENT_DEPTH = 8
 
@@ -210,27 +188,27 @@ function NikkiManager:_RegisterExtensions(config, mod_env)
     end
 end
 
--- ============================================================
--- _LoadDefs：核心编译逻辑（一次性加载）
--- ============================================================
 function NikkiManager:_LoadDefs(config)
     local defs = config.defs
     if not defs then return end
 
-    local raw_skill_data = nil
+    local effect_resolver = self:GetResolver("effect")
+    local skill_resolver = self:GetResolver("skill")
+    local state_resolver = self:GetResolver("state")
+    local trigger_resolver = self:GetResolver("trigger")
 
     -- 1. 加载 Effect
-    if defs.effect then
+    if defs.effect and effect_resolver then
         local effect_data = require(defs.effect)
         if effect_data then
-            self.effect_resolver:AddDefs(effect_data)
+            effect_resolver:AddDefs(effect_data)
             log.debug("[NikkiManager] Loaded effects from '%s'.", defs.effect)
         end
     end
 
     -- 2. 加载并编译 Skill
-    if defs.skill then
-        raw_skill_data = require(defs.skill)
+    if defs.skill and skill_resolver and trigger_resolver then
+        local raw_skill_data = require(defs.skill)
         if raw_skill_data then
             local all_skills = {}
             local trigger_data = {}
@@ -250,31 +228,28 @@ function NikkiManager:_LoadDefs(config)
                         def.toggle = nil
                     end
 
-                    -- 在 NikkiManager:_LoadDefs 的 Skill 循环里替换为：
                     local new_skills, new_triggers = self:_ProcessDefaultTriggers(skill_id, def)
 
-                    -- 无差别合并所有生成的技能 (母技能 + 子技能)
                     for sid, sdef in pairs(new_skills) do
                         all_skills[sid] = sdef
                     end
 
-                    -- 无差别合并所有生成的触发器
                     for sid, trigs in pairs(new_triggers) do
                         trigger_data[sid] = trigs
                     end
                 end
             end
 
-            if next(effect_defs) then
-                self.effect_resolver:AddDefs(effect_defs)
+            if next(effect_defs) and effect_resolver then
+                effect_resolver:AddDefs(effect_defs)
             end
 
             if next(all_skills) then
-                self.skill_resolver:AddDefs(all_skills)
+                skill_resolver:AddDefs(all_skills)
             end
 
             if next(trigger_data) then
-                self.trigger_resolver:AddDefs(trigger_data)
+                trigger_resolver:AddDefs(trigger_data)
             end
 
             log.debug("[NikkiManager] Loaded and processed skills from '%s'.", defs.skill)
@@ -282,43 +257,20 @@ function NikkiManager:_LoadDefs(config)
     end
 
     -- 3. 加载 State
-    if defs.state then
-        local state_cfg = defs.state
-        local state_file = type(state_cfg) == "table" and state_cfg.file or
-            (type(state_cfg) == "string" and state_cfg or nil)
-        if state_file then
-            local raw_state_data = require(state_file)
-            if raw_state_data then
-                self.state_resolver:AddDefs(raw_state_data)
-                log.debug("[NikkiManager] Loaded states from '%s'.", state_file)
-            end
-        end
-        -- 提取 basic 和 default 并保存到 resolver
-        if type(state_cfg) == "table" then
-            if state_cfg.basic then
-                self.state_resolver:SetBasicState(state_cfg.basic)
-            end
-            if state_cfg.default then
-                self.state_resolver:SetDefaultState(state_cfg.default)
-            end
+    if defs.state and state_resolver then
+        local raw_state_data = require(defs.state)
+        if raw_state_data then
+            state_resolver:AddDefs(raw_state_data)
+            log.debug("[NikkiManager] Loaded states from '%s'.", defs.state)
         end
     end
 end
 
--- ============================================================
--- 新增：加载 Framework 资源（食谱、动作、SG、图集）
--- 路径均位于 config.defs 下
--- ============================================================
 function NikkiManager:_LoadFrameworkResources(config, mod_env)
     local defs = config.defs
-    if not defs or type(defs) ~= "table" then
-        return
-    end
+    if not defs or type(defs) ~= "table" then return end
 
-    -- 获取 Mod API（优先 mod_env，否则全局）
-    local function getAPI(name)
-        return mod_env[name] or _G[name]
-    end
+    local function getAPI(name) return mod_env[name] or _G[name] end
 
     local AddRecipe2 = getAPI("AddRecipe2")
     local AddDeconstructRecipe = getAPI("AddDeconstructRecipe")
@@ -333,7 +285,6 @@ function NikkiManager:_LoadFrameworkResources(config, mod_env)
     local ActionHandler = getAPI("ActionHandler") or ActionHandler
     local EventHandler = getAPI("EventHandler") or EventHandler
 
-    -- 辅助加载函数
     local function loadFile(path, callback)
         if not path then return end
         local ok, data = pcall(require, path)
@@ -345,13 +296,11 @@ function NikkiManager:_LoadFrameworkResources(config, mod_env)
         end
     end
 
-    -- 1. 处理配方（recipes）
     if defs.recipes then
         loadFile(defs.recipes, function(recipes_data)
-            -- 制作配方
             if recipes_data.Recipes then
                 for _, data in pairs(recipes_data.Recipes) do
-                    local config = {
+                    local cfg = {
                         placer = data.placer,
                         min_spacing = data.min_spacing,
                         nounlock = data.nounlock,
@@ -365,31 +314,21 @@ function NikkiManager:_LoadFrameworkResources(config, mod_env)
                     }
                     local tech_required = data.level or TECH.NONE
                     local filters = data.filters or {}
-                    if data.tab and #filters == 0 then
-                        table.insert(filters, data.tab)
-                    end
-                    if #filters == 0 then
-                        table.insert(filters, "MODS")
-                    end
-                    AddRecipe2(data.name, data.ingredients, tech_required, config, filters)
+                    if data.tab and #filters == 0 then table.insert(filters, data.tab) end
+                    if #filters == 0 then table.insert(filters, "MODS") end
+                    AddRecipe2(data.name, data.ingredients, tech_required, cfg, filters)
                 end
             end
-
-            -- 分解配方
             if recipes_data.DeconstructRecipes then
                 for _, data in pairs(recipes_data.DeconstructRecipes) do
                     AddDeconstructRecipe(data.name, data.return_ingredients)
                 end
             end
-
-            -- 食物值
             if recipes_data.IngredientValues then
                 for _, data in pairs(recipes_data.IngredientValues) do
                     AddIngredientValues(data.names, data.tags, data.cancook, data.candry)
                 end
             end
-
-            -- 烹饪配方
             if recipes_data.CookerRecipes then
                 for cooker, recipes in pairs(recipes_data.CookerRecipes) do
                     for _, recipe in ipairs(recipes) do
@@ -400,7 +339,6 @@ function NikkiManager:_LoadFrameworkResources(config, mod_env)
         end)
     end
 
-    -- 2. 处理动作（actions）
     if defs.actions then
         loadFile(defs.actions, function(actions_data)
             if actions_data.actions then
@@ -417,7 +355,6 @@ function NikkiManager:_LoadFrameworkResources(config, mod_env)
                     end
                 end
             end
-
             if actions_data.component_actions then
                 for _, v in pairs(actions_data.component_actions) do
                     local parm_idx = v.type == "POINT" and -3 or -2
@@ -436,7 +373,6 @@ function NikkiManager:_LoadFrameworkResources(config, mod_env)
         end)
     end
 
-    -- 3. 处理 SG（状态图）
     if defs.sg then
         loadFile(defs.sg, function(sg_data)
             if sg_data.sgs then
@@ -456,7 +392,6 @@ function NikkiManager:_LoadFrameworkResources(config, mod_env)
         end)
     end
 
-    -- 4. 处理图集注册（images）
     if defs.images then
         loadFile(defs.images, function(images_data)
             for _, atlas_data in ipairs(images_data) do
@@ -471,13 +406,8 @@ function NikkiManager:_LoadFrameworkResources(config, mod_env)
     end
 end
 
--- ============================================================
--- _ProcessToggle：处理单个技能的 toggle
--- ============================================================
 function NikkiManager:_ProcessToggle(skill_id, def)
-    if not def.toggle then
-        return nil
-    end
+    if not def.toggle then return nil end
 
     if type(def.toggle) == "string" then
         return { effect_id = def.toggle }
@@ -492,14 +422,10 @@ function NikkiManager:_ProcessToggle(skill_id, def)
     end
 end
 
--- ============================================================
--- _ProcessDefaultTriggers：处理 default_triggers 并彻底展平
--- ============================================================
 function NikkiManager:_ProcessDefaultTriggers(skill_id, def)
     local skills_to_add = {}
     local triggers_to_add = {}
 
-    -- 1. 先把母技能存进去
     local processed_def = {}
     for k, v in pairs(def) do
         if k ~= "default_triggers" then
@@ -517,19 +443,16 @@ function NikkiManager:_ProcessDefaultTriggers(skill_id, def)
     local sub_skill_list = {}
     local parent_triggers = {}
 
-    -- 2. 解析触发器，生成平级的子技能和触发器映射
     for _, trigger_type in ipairs(trigger_types) do
         local trigger_map = default_triggers[trigger_type]
         if trigger_map then
             for trigger_key, trigger_value in pairs(trigger_map) do
                 if trigger_value == true then
-                    -- 触发器归属母技能
                     if not parent_triggers[trigger_type] then
                         parent_triggers[trigger_type] = {}
                     end
                     table.insert(parent_triggers[trigger_type], trigger_key)
                 else
-                    -- 生成子技能及其触发器
                     local sub_skill_id = GenerateSubSkillId(skill_id, trigger_type, trigger_key)
                     local sub_def = self:_BuildSubSkillDef(skill_id, def, trigger_value)
 
@@ -543,12 +466,10 @@ function NikkiManager:_ProcessDefaultTriggers(skill_id, def)
         end
     end
 
-    -- 3. 如果母技能有需要绑定的触发器，也平级存进去
     if next(parent_triggers) then
         triggers_to_add[skill_id] = parent_triggers
     end
 
-    -- 记录树形结构，方便 AddSkills 时能递归找到子技能
     if #sub_skill_list > 0 then
         processed_def._sub_skills = sub_skill_list
     end
@@ -556,9 +477,6 @@ function NikkiManager:_ProcessDefaultTriggers(skill_id, def)
     return skills_to_add, triggers_to_add
 end
 
--- ============================================================
--- _BuildSubSkillDef：构建子技能定义
--- ============================================================
 function NikkiManager:_BuildSubSkillDef(skill_id, parent_def, trigger_value)
     local sub_def = {}
 
@@ -585,9 +503,6 @@ function NikkiManager:_BuildSubSkillDef(skill_id, parent_def, trigger_value)
     return sub_def
 end
 
--- ============================================================
--- 客户端设置
--- ============================================================
 function NikkiManager:_LoadSettings()
     TheSim:GetPersistentString(self._settings_file, function(success, str)
         if success and type(str) == "string" and str ~= "" then
@@ -611,9 +526,6 @@ function NikkiManager:_SaveSettings()
     end
 end
 
--- ============================================================
--- 装配分发
--- ============================================================
 function NikkiManager:_ApplyTo(config, mod_env)
     local apply_to = config.apply_to or {}
     local custom_resources = config.custom_resources
@@ -645,11 +557,6 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
     inst:AddTag("nikki_framework")
 
     if tier_level >= 3 then
-        -- 用于 Replica 初始化装配Resolver
-        inst._replica_skill_resolver = self.skill_resolver
-        inst._replica_state_resolver = self.state_resolver
-        inst._replica_skill_trigger_resolver = self.state_resolver
-        -- HUD 处理
         inst:DoTaskInTime(0, function()
             if inst.components.playeractionpicker then
                 inst.components.playeractionpicker.leftclickoverride = MakeClickOverride(false)
@@ -669,9 +576,7 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
         end)
     end
 
-    if not TheWorld.ismastersim then return end
-
-    if tier_level < 2 then return end
+    if not TheWorld.ismastersim or tier_level < 2 then return end
 
     if custom_resources then
         for res_id, config_data in pairs(custom_resources) do
@@ -684,55 +589,18 @@ function NikkiManager:ApplyFrameworkToInst(inst, tier_name, custom_resources)
         end
     end
 
-    if not inst.components.nikki_effect then
-        inst:AddComponent("nikki_effect")
-    end
-    if not inst.components.nikki_skill then
-        inst:AddComponent("nikki_skill")
-    end
-    if not inst.components.nikki_skill_trigger then
-        inst:AddComponent("nikki_skill_trigger")
-    end
-    if not inst.components.nikki_skill_caster then
-        inst:AddComponent("nikki_skill_caster")
-    end
-    if not inst.components.nikki_state then
-        inst:AddComponent("nikki_state")
-    end
-
-    inst.components.nikki_effect._resolver = self.effect_resolver
-    inst.components.nikki_skill._resolver = self.skill_resolver
-    inst.components.nikki_skill._trigger_resolver = self.trigger_resolver
-    inst.components.nikki_skill_trigger._resolver = self.state_resolver
-    inst.components.nikki_state._resolver = self.state_resolver
-
-    -- 从 resolver 获取 basic/default
-    local basic_state = self.state_resolver:GetBasicState()
-    local default_state = self.state_resolver:GetDefaultState()
-
-    if inst.components.nikki_state and basic_state then
-        inst.components.nikki_state:ApplyBasic(basic_state)
-    end
-
-    if inst.components.nikki_state and default_state then
-        inst.components.nikki_state:SetDefaultState(default_state)
-        inst:DoTaskInTime(0, function()
-            if not inst.components.nikki_state:GetState()
-                and not inst:HasTag("playerghost")
-                and not (inst.components.health and inst.components.health:IsDead()) then
-                inst.components.nikki_state:SetState(default_state)
-            end
-        end)
-    end
-
-    if tier_level < 3 then return end
+    if not inst.components.nikki_effect then inst:AddComponent("nikki_effect") end
+    if not inst.components.nikki_skill then inst:AddComponent("nikki_skill") end
+    if not inst.components.nikki_skill_trigger then inst:AddComponent("nikki_skill_trigger") end
+    if not inst.components.nikki_skill_caster then inst:AddComponent("nikki_skill_caster") end
+    if not inst.components.nikki_state then inst:AddComponent("nikki_state") end
 end
 
 -- ============================================================
--- 公开 API：技能
+-- 公开门面 API：行为操作
 -- ============================================================
 function NikkiManager:OpenSkillWheel(inst)
-    local cmp_caster = inst.components.nikki_skill_caster
+    local cmp_caster = inst and inst.components.nikki_skill_caster
     if cmp_caster then
         if cmp_caster:IsWheelOpen() then
             cmp_caster:CloseWheel()
@@ -744,26 +612,17 @@ function NikkiManager:OpenSkillWheel(inst)
 end
 
 function NikkiManager:ExecuteSkill(inst, skill_id, params)
-    local cmp_caster = inst.components.nikki_skill_caster
+    local cmp_caster = inst and inst.components.nikki_skill_caster
     if cmp_caster then
         return cmp_caster:Execute(skill_id, params)
     end
     return true
 end
 
--- ============================================================
--- 公开 API：效果
--- ============================================================
 function NikkiManager:ApplyEffect(target, effect_id, source)
-    if not target then
-        return false
-    end
-    if not effect_id then
-        return false
-    end
+    if not target or not effect_id then return false end
     if not target.components.nikki_effect then
         target:AddComponent("nikki_effect")
-        target.components.nikki_effect._resolver = self.effect_resolver
     end
     return target.components.nikki_effect:Apply(effect_id, source)
 end
@@ -778,12 +637,9 @@ function NikkiManager:HasEffect(target, effect_id)
     return target.components.nikki_effect:HasEffect(effect_id)
 end
 
--- ============================================================
--- 公开 API：状态
--- ============================================================
-function NikkiManager:SetState(inst, state_id)
+function NikkiManager:SetState(inst, state_id, force)
     if not inst or not inst.components.nikki_state then return false end
-    return inst.components.nikki_state:SetState(state_id)
+    return inst.components.nikki_state:SetState(state_id, force)
 end
 
 function NikkiManager:GetState(inst)
@@ -792,26 +648,14 @@ function NikkiManager:GetState(inst)
 end
 
 -- ============================================================
--- 公开 API：查询
+-- 纯正服务定位器 API：获取 Resolver
 -- ============================================================
-function NikkiManager:GetSkillDef(skill_id)
-    return self.skill_resolver and self.skill_resolver:GetDef(skill_id)
-end
-
-function NikkiManager:GetEffectDef(effect_id)
-    return self.effect_resolver and self.effect_resolver:GetDef(effect_id)
-end
-
-function NikkiManager:GetStateDef(state_id)
-    return self.state_resolver and self.state_resolver:GetDef(state_id)
-end
-
-function NikkiManager:GetSkillDisplayName(skill_id)
-    return self.skill_resolver and self.skill_resolver:GetDisplayName(skill_id) or skill_id
+function NikkiManager:GetResolver(resolver_name)
+    return self.resolvers[resolver_name]
 end
 
 -- ============================================================
--- 公开 API：客户端设置
+-- 客户端设置 API
 -- ============================================================
 function NikkiManager:GetSetting(key)
     return self._settings[key]
@@ -830,64 +674,7 @@ function NikkiManager:ToggleSetting(key)
     return self._settings[key]
 end
 
-function NikkiManager:GetPlayerStatusSnapshot(inst)
-    -- local snapshot = {
-    --     state = { id = "unknown", name = "未知形态" },
-    --     effects = {}
-    -- }
-    -- if not inst then return snapshot end
-
-    -- -- 1. 获取当前形态 (兼容主客机)
-    -- local state_id = nil
-    -- if inst.components.nikki_state then
-    --     state_id = inst.components.nikki_state:GetState()
-    -- elseif inst.replica.nikki_state and inst.replica.nikki_state.GetState then
-    --     state_id = inst.replica.nikki_state:GetState()
-    -- end
-
-    -- if state_id then
-    --     snapshot.state.id = state_id
-    --     -- 尝试从 def 中获取名字，这里假设你的 state def 有 name 字段，没有则回退为 id
-    --     local def = self:GetStateDef(state_id)
-    --     snapshot.state.name = (def and def.name) or state_id
-    -- end
-
-    -- -- 2. 获取当前效果列表 (兼容主客机)
-    -- local active_effects = {}
-    -- if inst.components.nikki_effect then
-    --     -- 主机端直接读表
-    --     for id, data in pairs(inst.components.nikki_effect._active_effects) do
-    --         active_effects[id] = data.layers
-    --     end
-    -- elseif inst.replica.nikki_effect and inst.replica.nikki_effect.GetActiveEffects then
-    --     -- 客机端从网络同步组件获取（需要你后续在 replica 中实现同步）
-    --     active_effects = inst.replica.nikki_effect:GetActiveEffects()
-    -- end
-
-    -- for id, layers in pairs(active_effects) do
-    --     local def = self:GetEffectDef(id)
-    --     table.insert(snapshot.effects, {
-    --         id = id,
-    --         name = (def and def.name) or id, -- 尝试获取配置好的中文名
-    --         layers = layers
-    --     })
-    -- end
-
-    -- return snapshot
-
-    return {
-        state = {
-            id = "sparky",
-            name = "满电行动", -- 从 Def 获取到的本地化名称
-        },
-        effects = {
-            { id = "beam", name = "远光", layers = 2 },
-            { id = "brisk", name = "轻盈泡泡", layers = 1 },
-        }
-    }
-end
-
--- 单例
+-- 单例出口
 -- ============================================================
 local instance = nil
 

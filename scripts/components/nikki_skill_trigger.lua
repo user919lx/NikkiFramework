@@ -1,36 +1,14 @@
--- scripts/components/nikki_skill_trigger.lua
 local log = require("utils/log")
 
 local NikkiSkillTrigger = Class(function(self, inst)
     self.inst = inst
-    self._resolver = nil -- 由 Manager 注入
-
     self.triggers = {
         keys = {},
         actions = {},
         events = {},
     }
-
-    -- 监听状态变化，刷新 keys
-    self.inst:ListenForEvent("nikki_state_dirty", function(inst, data)
-        local state = data and data.state
-        local old_state = data and data.old_state
-        self:_RefreshKeys(state, old_state)
-    end)
-
-    -- 延迟执行初始刷新，传入 basic 状态
-    self.inst:DoTaskInTime(0, function()
-        local resolver = self._resolver
-        if resolver then
-            local basic_state = resolver:GetBasicState()
-            self:_RefreshKeys(basic_state, nil)
-        end
-    end)
 end)
 
--- ============================================================
--- 添加触发器绑定
--- ============================================================
 function NikkiSkillTrigger:Add(trigger_type, trigger_key, skill_id)
     if type(trigger_type) ~= "string" then
         log.warn("[NikkiSkillTrigger] Add: trigger_type must be string, got %s", tostring(trigger_type))
@@ -61,9 +39,6 @@ function NikkiSkillTrigger:Add(trigger_type, trigger_key, skill_id)
     return true
 end
 
--- ============================================================
--- 移除触发器绑定
--- ============================================================
 function NikkiSkillTrigger:Remove(trigger_type, trigger_key, skill_id)
     if type(trigger_type) ~= "string" then
         log.warn("[NikkiSkillTrigger] Remove: trigger_type must be string, got %s", tostring(trigger_type))
@@ -102,64 +77,10 @@ function NikkiSkillTrigger:Remove(trigger_type, trigger_key, skill_id)
     return true
 end
 
--- ============================================================
--- 清空所有触发器
--- ============================================================
 function NikkiSkillTrigger:Clear()
     self.triggers = { keys = {}, actions = {}, events = {} }
 end
 
--- ============================================================
--- 刷新 keys 绑定（支持 state 覆盖，但内部有 fallback）
--- ============================================================
-function NikkiSkillTrigger:_RefreshKeys(current_state, old_state)
-    local resolver = self._resolver
-    if not resolver then
-        return
-    end
-
-    -- 若未传入当前状态，则从组件获取
-    if not current_state then
-        local state_comp = self.inst.components.nikki_state
-        if state_comp then
-            current_state = state_comp:GetState()
-        end
-    end
-    if not current_state then
-        log.debug("[NikkiSkillTrigger] No state available to refresh keys.")
-        return
-    end
-
-    -- 处理旧状态：移除旧状态的按键绑定
-    if old_state then
-        local old_def = resolver:GetStateDef(old_state)
-        if old_def and old_def.keys then
-            for key_code, skill_id in pairs(old_def.keys) do
-                self:Remove("keys", key_code, skill_id)
-            end
-            log.debug("[NikkiSkillTrigger] Removed keys for old state '%s'", old_state)
-        end
-    end
-
-    -- 处理新状态：添加新状态的按键绑定
-    local state_def = resolver:GetStateDef(current_state)
-    if not state_def then
-        log.debug("[NikkiSkillTrigger] State definition not found for '%s'", current_state)
-        return
-    end
-
-    if state_def.keys then
-        for key_code, skill_id in pairs(state_def.keys) do
-            self:Add("keys", key_code, skill_id)
-        end
-    end
-
-    log.debug("[NikkiSkillTrigger] Refreshed keys for state '%s' (old_state=%s)", current_state, tostring(old_state))
-end
-
--- ============================================================
--- 统一触发接口
--- ============================================================
 function NikkiSkillTrigger:Trigger(trigger_type, trigger_key, params)
     if type(trigger_type) ~= "string" then
         log.warn("[NikkiSkillTrigger] Trigger: trigger_type must be string, got %s", tostring(trigger_type))
@@ -171,9 +92,8 @@ function NikkiSkillTrigger:Trigger(trigger_type, trigger_key, params)
     if not skill_comp then
         return false
     end
-    -- ============================================================
-    -- 主动触发：走 TryExecute 触发动作流程
-    -- ============================================================
+
+    -- 主动按键/快捷施法
     local skill_id = nil
     if trigger_type == "cast" then
         skill_id = trigger_key
@@ -184,9 +104,7 @@ function NikkiSkillTrigger:Trigger(trigger_type, trigger_key, params)
         return skill_comp:TryExecute(skill_id, params)
     end
 
-    -- ============================================================
-    -- 被动触发：直接走 Execute 不触发动作流程
-    -- ============================================================
+    -- 被动触发
     local skill_set = self.triggers[trigger_type] and self.triggers[trigger_type][trigger_key]
     if not skill_set or next(skill_set) == nil then
         return false

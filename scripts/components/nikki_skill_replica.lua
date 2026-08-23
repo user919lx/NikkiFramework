@@ -1,5 +1,6 @@
--- scripts/components/nikki_skill_replica.lua
 local log = require("utils/log")
+local NikkiManager = require("nikki_manager")
+
 local NikkiSkill = Class(function(self, inst)
     self.inst = inst
 
@@ -8,9 +9,6 @@ local NikkiSkill = Class(function(self, inst)
 
     self._active_skills_str = net_string(inst.GUID, "skill._active_skills_str", "skill_activeskillsdirty")
     self._active_skills_cache = {}
-
-    self._resolver = inst._replica_skill_resolver
-    inst._replica_skill_resolver = nil
 
     if not TheWorld.ismastersim then
         inst:ListenForEvent("skill_maxrangedirty", function()
@@ -25,15 +23,15 @@ local NikkiSkill = Class(function(self, inst)
             end
 
             log.debug("[NikkiSkill Replica] Updated active skills cache: %s", str)
-            -- 状态改变，直接向外派发脏标记事件
             self.inst:PushEvent("nikki_active_skills_dirty")
         end)
     end
 end)
 
--- ============================================================
--- 数据同步 (Server)
--- ============================================================
+function NikkiSkill:_GetResolver()
+    return NikkiManager.GetInstance():GetResolver("skill")
+end
+
 function NikkiSkill:SetMaxRange(range)
     self._max_range:set(range or 0)
 end
@@ -51,9 +49,6 @@ function NikkiSkill:SyncActiveSkills()
     log.debug("[NikkiSkill Replica] Synced active skills: %s", str)
 end
 
--- ============================================================
--- 动态查询接口
--- ============================================================
 function NikkiSkill:IsAdded(skill_id)
     return self._active_skills_cache[skill_id] == true
 end
@@ -74,7 +69,6 @@ function NikkiSkill:GetMaxRange()
     end
 end
 
--- 冷却查询
 function NikkiSkill:GetCooldownPercent(skill_id)
     if self.inst.components.spellbookcooldowns then
         local pct = self.inst.components.spellbookcooldowns:GetSpellCooldownPercent(skill_id)
@@ -92,27 +86,29 @@ function NikkiSkill:IsOnCooldown(skill_id)
     return false
 end
 
--- ============================================================
--- 静态查询接口 (转发SkillResolver)
--- ============================================================
 function NikkiSkill:GetSkillDef(id)
-    if self._resolver then return self._resolver:GetDef(id) end
+    local resolver = self:_GetResolver()
+    return resolver and resolver:GetDef(id)
 end
 
 function NikkiSkill:GetSkillActionDef(id)
-    if self._resolver then return self._resolver:GetActionDef(id) end
+    local resolver = self:_GetResolver()
+    return resolver and resolver:GetActionDef(id)
 end
 
 function NikkiSkill:GetSkillTargetingDef(id)
-    if self._resolver then return self._resolver:GetTargetingDef(id) end
+    local resolver = self:_GetResolver()
+    return resolver and resolver:GetTargetingDef(id)
 end
 
 function NikkiSkill:GetSkillRange(id)
-    if self._resolver then return self._resolver:GetRange(id) end
+    local resolver = self:_GetResolver()
+    return resolver and resolver:GetRange(id)
 end
 
 function NikkiSkill:GetSkillName(id)
-    if self._resolver then return self._resolver:GetDisplayName(id) end
+    local resolver = self:_GetResolver()
+    return resolver and resolver:GetDisplayName(id)
 end
 
 return NikkiSkill

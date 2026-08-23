@@ -1,8 +1,8 @@
--- scripts/components/nikki_effect.lua
 local log = require("utils/log")
 local TimerScheduler = require("utils/timer_scheduler")
 local ResourceAdapter = require("adapters/resource_adapter")
 local ModifierAdapter = require("adapters/modifier_adapter")
+local NikkiManager = require("nikki_manager")
 
 -- ============================================================
 -- 内部辅助：资源速率处理
@@ -55,14 +55,8 @@ end
 local NikkiEffect = Class(function(self, inst)
     self.inst = inst
     self._active_effects = {}
-    self._sources = {} -- table<effect_id, table<source, true>>
-    self._resolver = nil
+    self._sources = {}
     self._scheduler = TimerScheduler(inst)
-
-    self.inst:ListenForEvent("death", function()
-        log.debug("[NikkiEffect] %s died, clearing all active effects.", tostring(self.inst))
-        self:Clear()
-    end)
 
     self.inst:ListenForEvent("nikki_state_dirty", function(owner, data)
         local new_state = data and data.state
@@ -77,17 +71,19 @@ local NikkiEffect = Class(function(self, inst)
             self:Remove(id, true)
         end
     end)
-
     self.inst:StartUpdatingComponent(self)
 end)
 
 -- ============================================================
 -- 内部私有方法
 -- ============================================================
+function NikkiEffect:_GetResolver()
+    return NikkiManager.GetInstance():GetResolver("effect")
+end
 
 function NikkiEffect:_GetDef(id)
-    if not self._resolver then return nil end
-    return self._resolver:GetDef(id)
+    local resolver = self:_GetResolver()
+    return resolver and resolver:GetDef(id)
 end
 
 function NikkiEffect:_GetOrCreateSources(id)
@@ -239,7 +235,6 @@ end
 -- ============================================================
 -- 公开查询 API
 -- ============================================================
-
 function NikkiEffect:HasEffect(id)
     return self._active_effects[id] ~= nil
 end
@@ -253,7 +248,7 @@ function NikkiEffect:GetSources(id)
 end
 
 function NikkiEffect:IsPermanent(id)
-    local resolver = self._resolver
+    local resolver = self:_GetResolver()
     if not resolver then return false end
     local duration, _, _ = resolver:GetEffectConfig(id)
     return duration == nil
@@ -262,20 +257,13 @@ end
 -- ============================================================
 -- 公开操作 API
 -- ============================================================
-
 function NikkiEffect:Apply(id, source)
-    local resolver = self._resolver
+    local resolver = self:_GetResolver()
     if not resolver then return false end
-
-    if self.inst.components.health and self.inst.components.health:IsDead() then
-        log.debug("[NikkiEffect] Cannot apply effect '%s' to %s because it is dead.", tostring(id), tostring(self.inst))
-        return false
-    end
 
     local duration, max, mode, bind_to_state = resolver:GetEffectConfig(id)
     local active = self._active_effects[id]
 
-    -- 记录 source 到映射表 (key = source, value = true)
     self:_AddSource(id, source)
 
     if not active then
@@ -373,7 +361,6 @@ function NikkiEffect:Remove(id, force_all, source)
     local active = self._active_effects[id]
     if not active then return end
 
-    -- 单项移除 source (value = nil)
     if source ~= nil then
         self:_RemoveSource(id, source)
     end
@@ -392,7 +379,7 @@ function NikkiEffect:Remove(id, force_all, source)
         self._scheduler:Cancel(id)
         self:_OnEffectEnd(id, active.context)
         self._active_effects[id] = nil
-        self:_ClearSources(id) -- 彻底结束时清理来源表
+        self:_ClearSources(id)
         log.debug("[NikkiEffect] Effect '%s' on %s fully removed.", tostring(id), tostring(self.inst))
     else
         active.context.layers = active.layers
@@ -422,10 +409,6 @@ function NikkiEffect:Clear()
 end
 
 function NikkiEffect:OnUpdate(dt)
-    if self.inst.components.health and self.inst.components.health:IsDead() then
-        return
-    end
-
     for id, active in pairs(self._active_effects) do
         local should_keep = self:_OnUpdateEffect(id, dt, active.context)
         if not should_keep then

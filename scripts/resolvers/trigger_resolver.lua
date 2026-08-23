@@ -1,4 +1,3 @@
--- scripts/resolvers/trigger_resolver.lua
 local BaseResolver = require("resolvers/base_resolver")
 
 -- ============================================================

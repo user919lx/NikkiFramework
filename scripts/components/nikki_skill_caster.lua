@@ -1,6 +1,7 @@
--- scripts/components/nikki_skill_caster.lua
 local log = require("utils/log")
 local ResourceAdapter = require("adapters/resource_adapter")
+local NikkiManager = require("nikki_manager")
+
 local DEFAULT_WHEEL_RADIUS = 100
 local DEFAULT_WHEEL_FOCUS_RADIUS = DEFAULT_WHEEL_RADIUS + 3
 
@@ -56,16 +57,10 @@ function NikkiSkillCaster:Init()
     end)
 end
 
--- ============================================================
--- 查询
--- ============================================================
 function NikkiSkillCaster:GetSpellIndex(skill_id)
     return self._spell_index_map[skill_id]
 end
 
--- ============================================================
--- 轮盘与界面状态控制
--- ============================================================
 function NikkiSkillCaster:IsWheelOpen()
     local hud = self.inst.HUD
     if hud and hud.controls and hud.controls.spellwheel then
@@ -87,7 +82,6 @@ function NikkiSkillCaster:OpenWheel(radius, focus_radius)
         self.inst.components.playercontroller:CancelAOETargeting()
     end
 
-    -- 以实际 HUD 打开状态为准拦截
     if self:IsWheelOpen() then return end
 
     local hud = self.inst.HUD
@@ -120,7 +114,6 @@ function NikkiSkillCaster:OpenWheel(radius, focus_radius)
         end
     end
 
-    -- 拦截空数据，杜绝 360/0 崩溃
     if #itemscpy == 0 then
         log.debug("[NikkiSkillCaster] No wheel items available to display")
         return
@@ -139,14 +132,10 @@ function NikkiSkillCaster:GetWheelItems()
     return self._wheel_items
 end
 
--- ============================================================
--- 独立刷新逻辑：AOE Spell 与 Wheel Items 分离
--- ============================================================
-
 function NikkiSkillCaster:_RefreshSpell()
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return end
-    local resolver = skill_manager._resolver
+    local resolver = NikkiManager.GetInstance():GetResolver("skill")
     if not resolver or not resolver.BuildSpellItemsByIds then return end
     local active_skills = skill_manager:GetActiveSkills()
     local spell_items, index_map = resolver:BuildSpellItemsByIds(active_skills)
@@ -161,7 +150,7 @@ end
 function NikkiSkillCaster:_RefreshWheel()
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return end
-    local resolver = skill_manager._resolver
+    local resolver = NikkiManager.GetInstance():GetResolver("skill")
     if not resolver then return end
     local active_skills = skill_manager:GetActiveSkills()
     if resolver.BuildWheelItemsByIds then
@@ -172,9 +161,6 @@ function NikkiSkillCaster:_RefreshWheel()
     log.debug("[NikkiSkillCaster _RefreshWheel] Wheel items updated: %d", #self._wheel_items)
 end
 
--- ============================================================
--- [主客机通用] 动作构造与上下文分析
--- ============================================================
 function NikkiSkillCaster:BuildBufferedAction(target, pos, skill_id, is_client)
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return nil end
@@ -237,9 +223,6 @@ function NikkiSkillCaster:GetAvailableSkillAction(target, pos, right)
     return self:BuildBufferedAction(target, pos, candidates[1].skill_id, not TheWorld.ismastersim)
 end
 
--- ============================================================
--- [主客机通用] 主动执行路由
--- ============================================================
 function NikkiSkillCaster:TryExecute(skill_id, params)
     log.debug("[NikkiSkillCaster] TryExecute called for skill '%s' with params: %s", tostring(skill_id), tostring(params))
     local skill_manager = GetSkillManager(self)
@@ -272,7 +255,6 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
         end
     end
 
-    -- 瞬发技能逻辑
     local action_def = def.action
     if not action_def then
         if TheWorld.ismastersim then
@@ -283,7 +265,6 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
         end
     end
 
-    -- 参数补全 (fallback)
     local invoke = action_def.invoke or "instant"
     local target = params and params.target
     local pos = params and params.pos
@@ -321,9 +302,6 @@ function NikkiSkillCaster:TryExecute(skill_id, params)
     return false
 end
 
--- ============================================================
--- 统一最终结算
--- ============================================================
 function NikkiSkillCaster:Execute(skill_id, params)
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return false, "NO_MANAGER" end
