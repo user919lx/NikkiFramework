@@ -43,9 +43,8 @@ local function HookCastAOEHandler(sg)
         -- 重写 deststate 函数
         old_handler.deststate = function(inst, action)
             local invobject = action.invobject
-            local nikki_aoe_state = invobject and invobject.prefab == "nikki_spell_caster" and invobject
-                ._nikki_aoe_state
-            if nikki_aoe_state ~= nil then
+            local nikki_aoe_state = invobject and invobject.prefab == "nikki_spell_caster" and invobject._nikki_aoe_state
+            if nikki_aoe_state then
                 -- 如果是函数则执行，如果是字符串则直接返回
                 if type(nikki_aoe_state) == "function" then
                     local custom_state = nikki_aoe_state(inst, action)
@@ -56,9 +55,9 @@ local function HookCastAOEHandler(sg)
                     return nikki_aoe_state
                 end
             end
-            -- 如果没有设置自定义状态，维持原版/其他模组的逻辑[cite: 5, 6, 7]
             if old_deststate ~= nil then
-                return old_deststate(inst, action)
+                local old_state = old_deststate(inst, action)
+                return old_state
             end
         end
     end
