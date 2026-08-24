@@ -30,11 +30,8 @@ local function SetShape(inst, shape_name, radius, opt1)
     inst._shape = shape_name
     inst._radius = tonumber(radius) or inst._radius or DEFAULT_RADIUS
     inst._opt1 = opt1 or inst._opt1
-
     ApplyScale(inst)
-
     local r = inst._radius
-
     if shape_name == "CIRCLE" then
         inst.AnimState:SetFloatParams(0.0, 0.0, r)
     elseif shape_name == "CONE" then

@@ -17,7 +17,6 @@ function EffectResolver:OnDefAdded(id, def)
     if def.aura then
         local raw_effect = def.aura.effect
         local aura_effect_id = nil
-
         if type(raw_effect) == "string" then
             -- 语法糖：字符串直接视为已有的 effect_id，不生成也不注册
             aura_effect_id = raw_effect
@@ -26,14 +25,12 @@ function EffectResolver:OnDefAdded(id, def)
             aura_effect_id = GenerateAuraEffectId(id)
             self:AddDefs({ [aura_effect_id] = raw_effect })
         end
-
         local aura_cfg = {}
         for k, v in pairs(def.aura) do
             if k ~= "effect" then
                 aura_cfg[k] = v
             end
         end
-
         local old_on_apply = def.on_apply
         def.on_apply = function(inst, context)
             local aura_inst = SpawnPrefab("nikki_aura")
