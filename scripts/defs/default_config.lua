@@ -1,4 +1,5 @@
 local SourceModifierList = require("util/sourcemodifierlist")
+local UpvalueHelper = require("utils/upvalue_helper")
 
 return {
     -- ========================================================
@@ -77,8 +78,67 @@ return {
                 end
             end
         },
+        -- 免疫禁锢（钢羊浓痰）
+        no_pin = {
+            apply = function(inst, val, key)
+                if val ~= true then return end
+                local comp = inst.components.pinnable
+                if not comp then return end
+                if not comp._nikki_pin_sources then
+                    comp._nikki_pin_sources = {}
+                end
+                comp._nikki_pin_sources[key] = true
+                comp.canbepinned = false
+                if comp:IsStuck() then
+                    comp:Unstick()
+                end
+            end,
+            remove = function(inst, key)
+                local comp = inst.components.pinnable
+                if not comp or not comp._nikki_pin_sources then return end
+                comp._nikki_pin_sources[key] = nil
+                if not next(comp._nikki_pin_sources) then
+                    comp.canbepinned = true
+                end
+            end
+        },
+        -- 皮弗娄牛驯化获取速度加成
+        beefalo = {
+            -- 注册时自动完成底层 Upvalue Patch（全局单次执行）
+            init = function(env)
+                local Domesticatable = require("components/domesticatable")
+                local DoDeltaDomestication = UpvalueHelper.GetUpvalue(Domesticatable.DeltaDomestication,
+                    "DoDeltaDomestication")
+                if not DoDeltaDomestication then return end
+                local old_ApplyDomesticationSkillMult = UpvalueHelper.GetUpvalue(DoDeltaDomestication,
+                    "ApplyDomesticationSkillMult")
+                if not old_ApplyDomesticationSkillMult then return end
+                local function New_ApplyDomesticationSkillMult(inst, delta, doer)
+                    local trainer = doer or (inst.components.rideable ~= nil and inst.components.rideable:GetRider()) or
+                        nil
+                    local bonus = trainer and trainer._nikki_domestication_bonus and
+                        trainer._nikki_domestication_bonus:Get() or 0
+                    if bonus > 0 then
+                        delta = delta * (1 + bonus)
+                    end
+                    return old_ApplyDomesticationSkillMult(inst, delta, doer)
+                end
+                UpvalueHelper.SetUpvalue(DoDeltaDomestication, "ApplyDomesticationSkillMult",
+                    New_ApplyDomesticationSkillMult)
+            end,
+            apply = function(inst, val, key)
+                if not inst._nikki_domestication_bonus then
+                    inst._nikki_domestication_bonus = SourceModifierList(inst, 0, SourceModifierList.additive)
+                end
+                inst._nikki_domestication_bonus:SetModifier(key, val, key)
+            end,
+            remove = function(inst, key)
+                if inst._nikki_domestication_bonus then
+                    inst._nikki_domestication_bonus:RemoveModifier(key, key)
+                end
+            end
+        },
     },
-
     -- ========================================================
     -- 自定义基础消耗资源池 (Resources)
     -- ========================================================
