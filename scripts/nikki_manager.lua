@@ -19,22 +19,43 @@ local function GenerateToggleEffectId(skill_id)
     return "_skill_toggle_" .. skill_id
 end
 
+--- 检查目标是否具有基础交互有效性
+local function IsValidTargetForSkill(target)
+    if not target or not target:IsValid() then return false end
+    -- 排除不可交互对象与进入 Limbo 状态（如在背包中、消失中）的实体
+    if target:HasTag("INLIMBO") then
+        return false
+    end
+    return true
+end
+
+--- 检查是否需要让位给原版核心交互（如骑乘/上下牛）
+local function ShouldYieldToNativeInteractions(inst, target)
+    if not inst.replica.rider then return false end
+    -- 当目标可骑乘、且未被拴住，且满足骑乘标签时，优先让位给骑乘交互
+    if target and target:HasTag("rideable") and not target:HasTag("hitched") then
+        if not target:HasTag("dogrider_only") or inst:HasTag("dogrider") then
+            return true
+        end
+    end
+    return false
+end
+
 local function MakeClickOverride(is_right_click)
     return function(inst, target, pos)
-        if not inst then return {}, true end
+        if not inst or not inst:IsValid() then return {}, true end
+        if is_right_click and target then
+            if not IsValidTargetForSkill(target) or ShouldYieldToNativeInteractions(inst, target) then
+                return {}, true
+            end
+        end
         local cmp_caster = inst.components.nikki_skill_caster
-        if not cmp_caster then return {}, true end
-
-        local actions = {}
-        local act = cmp_caster:GetAvailableSkillAction(target, pos, is_right_click)
-        if act then
-            table.insert(actions, act)
+        if cmp_caster then
+            local act = cmp_caster:GetAvailableSkillAction(target, pos, is_right_click)
+            if act then
+                return { act }
+            end
         end
-
-        if #actions > 0 then
-            return actions
-        end
-
         return {}, true
     end
 end
@@ -638,8 +659,10 @@ function NikkiManager:ApplyInitial(inst, initial_cfg)
         end
         -- 抽离 Replica 装配闭包
         local function add_keys_to_replica(_inst, keys)
-            for key_code, skill_id in pairs(keys) do
-                _inst.replica.nikki_skill_trigger:AddKey(key_code, skill_id)
+            if _inst.replica and _inst.replica.nikki_skill_trigger then
+                for key_code, skill_id in pairs(keys) do
+                    _inst.replica.nikki_skill_trigger:AddKey(key_code, skill_id)
+                end
             end
         end
         -- 鸭子判定与短轮询兜底
