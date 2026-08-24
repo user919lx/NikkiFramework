@@ -21,7 +21,7 @@ Effect 代表**持续影响的能力**——移速加成、属性修改、周期
 | `on_apply` | function | 否 | 激活时回调 |
 | `on_remove` | function | 否 | 移除时回调 |
 | `on_layer_update` | function | 否 | 层数变化时回调 |
-| `fn` | function | 否 | 每帧回调，当`aura`参数存在时，自动忽略本参数 |
+| `fn` | function | 否 | 每帧回调 |
 
 
 可在 def 中自定义字段，在回调函数中通过 `context.def` 参数访问。
