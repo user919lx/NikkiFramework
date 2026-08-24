@@ -13,6 +13,7 @@ local function Attach(inst, owner)
     if owner and owner:IsValid() then
         inst.Follower:FollowSymbol(owner.GUID, "", 0, 0, 0, false, false)
         inst.Transform:SetNoFaced()
+        inst.owner = owner
     end
 end
 
