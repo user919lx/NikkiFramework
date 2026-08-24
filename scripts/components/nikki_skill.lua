@@ -210,9 +210,15 @@ function NikkiSkill:StartCooldown(skill_id, cd_time)
     end
 end
 
-function NikkiSkill:GetSkillDef(id)
+function NikkiSkill:GetSkillDef(id, is_copy)
     local resolver = self:_GetResolver()
-    return resolver and resolver:GetDef(id)
+    local def = nil
+    if is_copy == true then
+        def = resolver and resolver:GetDefCopy(id)
+    else
+        def = resolver and resolver:GetDef(id)
+    end
+    return def
 end
 
 function NikkiSkill:IsAdded(skill_id)

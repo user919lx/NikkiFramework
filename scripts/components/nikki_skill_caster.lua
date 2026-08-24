@@ -305,7 +305,7 @@ end
 function NikkiSkillCaster:Execute(skill_id, params)
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return false, "NO_MANAGER" end
-    local def = skill_manager:GetSkillDef(skill_id)
+    local def = skill_manager:GetSkillDef(skill_id, true)
     if not def then return false, "SKILL_NOT_FOUND" end
 
     if not skill_manager:IsAdded(skill_id) then return false, "NOT_ADDED" end
