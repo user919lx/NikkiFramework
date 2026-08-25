@@ -47,4 +47,11 @@ function ModifierAdapter.Remove(inst, mod_type, effect_id)
     end
 end
 
+function ModifierAdapter.GetAllKeys()
+    local keys = {}
+    for k, _ in pairs(MODIFIER_STRATEGIES) do
+        table.insert(keys, k)
+    end
+    return keys
+end
 return ModifierAdapter

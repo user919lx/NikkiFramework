@@ -789,6 +789,17 @@ function NikkiManager:GetResolver(resolver_name)
 end
 
 -- ============================================================
+-- 适配器查询 API
+-- ============================================================
+function NikkiManager:GetModifierKeys()
+    return ModifierAdapter.GetAllKeys()
+end
+
+function NikkiManager:GetResourceKeys()
+    return ResourceAdapter.GetAllKeys()
+end
+
+-- ============================================================
 -- 客户端设置 API
 -- ============================================================
 function NikkiManager:GetSetting(key)

@@ -209,4 +209,13 @@ function ResourceAdapter.RemoveDrain(inst, res_id, rate, key)
     strategy.server.remove_regen(inst, comp, rate, key)
 end
 
+function ResourceAdapter.GetAllKeys()
+    local keys = {}
+    for k, _ in pairs(RESOURCE_STRATEGIES) do
+        table.insert(keys, k)
+    end
+    return keys
+end
+
+
 return ResourceAdapter
