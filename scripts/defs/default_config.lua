@@ -144,8 +144,8 @@ return {
     -- ========================================================
     custom_resources = {
         health = {
-            component = { name = "health" },
-            server = {
+            component = {
+                name = "health",
                 get_current = function(comp) return comp.currenthealth or 0 end,
                 do_delta = function(comp, amount) comp:DoDelta(amount, false, "nikki_skill") end,
                 set_regen = function(inst, comp, rate, key)
@@ -161,8 +161,8 @@ return {
             }
         },
         sanity = {
-            component = { name = "sanity" },
-            server = {
+            component = {
+                name = "sanity",
                 get_current = function(comp) return comp.current or 0 end,
                 do_delta = function(comp, amount) comp:DoDelta(amount, false) end,
                 set_regen = function(inst, comp, rate, key)
@@ -178,8 +178,8 @@ return {
             }
         },
         hunger = {
-            component = { name = "hunger" },
-            server = {
+            component = {
+                name = "hunger",
                 get_current = function(comp) return comp.current or 0 end,
                 do_delta = function(comp, amount) comp:DoDelta(amount, false) end,
                 set_regen = function(inst, comp, rate, key)

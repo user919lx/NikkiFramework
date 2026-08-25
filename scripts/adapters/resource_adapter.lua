@@ -2,10 +2,7 @@ local log = require("utils/log")
 local ResourceAdapter = {}
 
 -- ========================================================
--- 内部工厂：严格划分 Server 与 Client (基于字符串寻址)
--- ========================================================
--- ========================================================
--- 内部工厂：严格划分 Server 与 Client (基于字符串寻址)
+-- 内部工厂：严格划分 Component 与 Replica (支持方法名字符串与函数覆盖)
 -- ========================================================
 local function CreateStrategy(config_data)
     local comp_cfg = config_data.component or {}
@@ -22,48 +19,38 @@ local function CreateStrategy(config_data)
     local fn_get_max = rep_cfg.get_max or "GetMax"
     local fn_get_rate_scale = rep_cfg.get_rate_scale or "GetRateScale"
 
-    -- 【优化】：提前解包并赋默认空表，彻底消灭又臭又长的 nil 判断
-    local srv = config_data.server or {}
-    local clt = config_data.client or {}
-
-    -- 基础策略：优先取用 config 传入的自定义覆盖函数，若没有则走字符串泛型寻址
+    -- 基础策略：优先使用函数覆盖，若为字符串则反射寻址，否则回退默认
     local strategy = {
         server = {
             comp_name = c_name,
-
-            get_current = srv.get_current or function(comp)
+            get_current = type(fn_get_current) == "function" and fn_get_current or function(comp)
                 if type(comp[fn_get_current]) == "function" then return comp[fn_get_current](comp) end
                 return comp.current or 0
             end,
-
-            do_delta = srv.do_delta or function(comp, amount)
+            do_delta = type(fn_do_delta) == "function" and fn_do_delta or function(comp, amount)
                 if type(comp[fn_do_delta]) == "function" then comp[fn_do_delta](comp, amount, false) end
             end,
-
-            set_regen = srv.set_regen or function(inst, comp, rate, key)
+            set_regen = type(fn_set_regen) == "function" and fn_set_regen or function(inst, comp, rate, key)
                 if type(comp[fn_set_regen]) == "function" then comp[fn_set_regen](comp, inst, rate, key) end
             end,
-
-            remove_regen = srv.remove_regen or function(inst, comp, rate, key)
+            remove_regen = type(fn_remove_regen) == "function" and fn_remove_regen or function(inst, comp, rate, key)
                 if type(comp[fn_remove_regen]) == "function" then comp[fn_remove_regen](comp, inst, key, rate) end
             end
         },
         client = {
-            get_percent = clt.get_percent or function(inst)
+            get_percent = type(fn_get_percent) == "function" and fn_get_percent or function(inst)
                 local rep = inst.replica and inst.replica[c_name]
                 if rep and type(rep[fn_get_percent]) == "function" then return rep[fn_get_percent](rep) end
                 return 0
             end,
-
-            get_max = clt.get_max or function(inst)
+            get_max = type(fn_get_max) == "function" and fn_get_max or function(inst)
                 local rep = inst.replica and inst.replica[c_name]
                 if not rep then return 100 end
                 if type(rep[fn_get_max]) == "function" then return rep[fn_get_max](rep) end
                 if type(rep.Max) == "function" then return rep:Max() end
                 return 100
             end,
-
-            get_rate_scale = clt.get_rate_scale or function(inst)
+            get_rate_scale = type(fn_get_rate_scale) == "function" and fn_get_rate_scale or function(inst)
                 local rep = inst.replica and inst.replica[c_name]
                 if rep and type(rep[fn_get_rate_scale]) == "function" then return rep[fn_get_rate_scale](rep) end
                 return RATE_SCALE.NEUTRAL
@@ -216,6 +203,5 @@ function ResourceAdapter.GetAllKeys()
     end
     return keys
 end
-
 
 return ResourceAdapter
