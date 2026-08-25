@@ -157,6 +157,9 @@ cost = { res = "sanity", amount = 10 }
 | `selector` | table | 否 | 目标过滤规则，见下表 |
 | `postinit` | function | 否 | 对光环实体执行初始化回调：`function(inst)` |
 | `effect` | table | 是 | 光环施加给目标的 Effect 定义表，完全遵循标准 Effect 的字段规范|
+| `on_enter` | function | 否 | 目标进入光环时的处理 `function(owner,params)` |
+| `on_exit` | function | 否 | 目标离开光环时的处理 `function(owner,params)` |
+| `on_pulse` | function | 否 | 目标位于光环内扫描到的处理`function(owner,params)` |
 
 ### selector
 
