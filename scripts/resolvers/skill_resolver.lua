@@ -107,12 +107,11 @@ local DEFAULT_RETICULE = {
 }
 -- 编译生命周期钩子
 function SkillResolver:OnDefAdded(id, def)
+    def.is_sub = def.is_sub or false
     def.targeting = def.targeting or {}
     def.excutor = {} -- 执行时的相关函数
     def.priority = def.priority or 0
     def.range = def.range or 0
-    def.radius = def.radius or 0
-
     local aoe_def = def.aoe
     local is_aoe = aoe_def ~= nil
     def.is_aoe = is_aoe
@@ -258,15 +257,9 @@ function SkillResolver:_BuildSpellItem(skill_id)
             spell_caster.components.spellbook:SetSpellName(name)
             if def.is_aoe then
                 spell_caster._nikki_aoe_state = action_def.state
-                local should_repeat_cast_fn = nil
-                if targeting_def.should_repeat_cast_fn then
-                    should_repeat_cast_fn = function(caster, doer)
-                        return targeting_def.should_repeat_cast_fn(doer)
-                    end
-                end
                 spell_caster.components.aoetargeting:SetAllowWater(targeting_def.allow_water or false)
                 spell_caster.components.aoetargeting:SetDeployRadius(targeting_def.deploy_radius)
-                spell_caster.components.aoetargeting:SetShouldRepeatCastFn(should_repeat_cast_fn)
+                spell_caster.components.aoetargeting:SetShouldRepeatCastFn(targeting_def.should_repeat_cast_fn)
                 spell_caster.components.aoetargeting:SetReticule(targeting_def.reticule)
                 if TheWorld.ismastersim then
                     spell_caster.components.aoetargeting:SetTargetFX(targeting_def.target_fx)
