@@ -501,19 +501,27 @@ end
 
 function NikkiManager:_BuildSubSkillDef(skill_id, parent_def, trigger_value)
     local sub_def = {}
-    setmetatable(sub_def, { __index = parent_def })
     if type(trigger_value) == "function" then
-        trigger_value = { fn = trigger_value }
-    end
-    if type(trigger_value) == "function" then
+        -- 规则 1：如果是 function，完全独立，不继承父 def
         sub_def.fn = trigger_value
     elseif type(trigger_value) == "table" then
-        for k, v in pairs(trigger_value) do
-            sub_def[k] = v
+        if trigger_value.fn ~= nil then
+            -- 规则 2：如果是包含 fn 的 table，完全独立，不继承父 def
+            for k, v in pairs(trigger_value) do
+                sub_def[k] = v
+            end
+        else
+            -- 规则 3：如果不包含 fn，则作为附加修饰，继承父 def 数据
+            setmetatable(sub_def, { __index = parent_def })
+            for k, v in pairs(trigger_value) do
+                sub_def[k] = v
+            end
         end
     else
         log.error("[NikkiManager] Invalid trigger_value type for skill '%s': %s", skill_id, type(trigger_value))
     end
+    sub_def.is_sub = true
+    sub_def.parent_skill = skill_id
     return sub_def
 end
 
