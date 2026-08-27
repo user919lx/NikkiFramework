@@ -305,16 +305,29 @@ end
 function NikkiSkillCaster:Execute(skill_id, params)
     local skill_manager = GetSkillManager(self)
     if not skill_manager then return false, "NO_MANAGER" end
-    local def = skill_manager:GetSkillDef(skill_id, true)
-    if not def then return false, "SKILL_NOT_FOUND" end
+    local def = skill_manager:GetSkillDef(skill_id)
+    if not def then
+        log.debug("[NikkiSkillCaster] Skill definition not found for skill '%s'", tostring(skill_id))
+        return false, "SKILL_NOT_FOUND"
+    end
 
-    if not skill_manager:IsAdded(skill_id) then return false, "NOT_ADDED" end
-    if skill_manager:IsOnCooldown(skill_id) then return false, "ON_COOLDOWN" end
+    if not skill_manager:IsAdded(skill_id) then
+        log.debug("[NikkiSkillCaster] Skill '%s' is not added to the skill manager", tostring(skill_id))
+        return false, "NOT_ADDED"
+    end
+    if skill_manager:IsOnCooldown(skill_id) then
+        log.debug("[NikkiSkillCaster] Skill '%s' is on cooldown", tostring(skill_id))
+        return false, "ON_COOLDOWN"
+    end
 
 
     if def.required_tags then
         for _, tag in ipairs(def.required_tags) do
-            if not self.inst:HasTag(tag) then return false, "MISSING_TAG: " .. tag end
+            if not self.inst:HasTag(tag) then
+                log.debug("[NikkiSkillCaster] Skill '%s' requires tag '%s' which is missing", tostring(skill_id),
+                    tostring(tag))
+                return false, "MISSING_TAG: " .. tag
+            end
         end
     end
 
@@ -323,17 +336,30 @@ function NikkiSkillCaster:Execute(skill_id, params)
         if current < def.cost.amount then
             local reason = string.upper(def.cost.res) .. "_NOT_ENOUGH"
             log.debug("[NikkiSkillCaster] Not enough resource for skill '%s': %s (required: %d, current: %d)",
-            tostring(skill_id), reason, def.cost.amount, current)
+                tostring(skill_id), reason, def.cost.amount, current)
             return false, reason
         end
     end
 
     if def.fn then
         local success, result, err = pcall(def.fn, self.inst, params, def)
-        if not success or result == false then
-            log.debug("[NikkiSkillCaster] Execute skill '%s' failed: %s", tostring(skill_id), tostring(err))
-            return false, err or "EXECUTION_REJECTED"
+
+        -- 情况 1：函数内部发生了代码崩溃 (Lua Error)
+        if not success then
+            -- 此时 result 是真正的报错信息，必须用 error 级别打印出来方便修 Bug
+            log.error("[NikkiSkillCaster] Execute skill '%s' CRASHED: %s", tostring(skill_id), tostring(result))
+            return false, "LUA_ERROR"
         end
+
+        -- 情况 2：代码正常执行，但业务逻辑主动拦截并返回了 false
+        if result == false then
+            -- 此时 err 才是开发者在 return false 时附带的原因
+            local reject_reason = err or "EXECUTION_REJECTED"
+            log.debug("[NikkiSkillCaster] Execute skill '%s' rejected: %s", tostring(skill_id), tostring(reject_reason))
+            return false, reject_reason
+        end
+
+        -- 情况 3：如果 result 为 true（或开发者忘了写 return 默认返回 nil），视为执行成功，继续往下走扣除消耗
     end
 
     if def.cost and def.cost.res and def.cost.amount and def.cost.amount > 0 then

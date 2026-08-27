@@ -247,6 +247,7 @@ function NikkiManager:_LoadDefs(config)
                             inst.components.nikki_effect:Toggle(toggle_result.effect_id)
                             return true
                         end
+                        def.is_toggle = true
                         def.toggle = nil
                     end
 
@@ -501,25 +502,55 @@ end
 
 function NikkiManager:_BuildSubSkillDef(skill_id, parent_def, trigger_value)
     local sub_def = {}
+
+    -- 【黑名单】：拦截主动机制与挂载副作用
+    local BLACKLIST = {
+        action = true,
+        cost = true,
+        cd = true,
+        aoe = true,
+        targeting = true,
+        wheel = true,
+        effects = true,          -- 防止子技能挂载时重复触发 Effect
+        tags = true,             -- 防止重复挂载 Tag
+        on_add = true,           -- 防止重复执行初始化
+        on_remove = true,        -- 防止重复清理
+        default_triggers = true, -- 防止无限递归
+        toggle = true,
+        client_only = true,
+    }
+
+    -- 封装黑名单元表：被访问的 key 如果在黑名单里，返回 nil；否则去父表里拿实时数据
+    local filtered_mt = {
+        __index = function(t, k)
+            if not BLACKLIST[k] then
+                return parent_def[k]
+            end
+            return nil
+        end
+    }
+
     if type(trigger_value) == "function" then
-        -- 规则 1：如果是 function，完全独立，不继承父 def
+        -- 规则 1：独立的 fn
         sub_def.fn = trigger_value
+        setmetatable(sub_def, filtered_mt)
     elseif type(trigger_value) == "table" then
+        -- 无论是有 fn 还是没 fn，开发者手写的属性都要赋给子表自身
+        for k, v in pairs(trigger_value) do
+            sub_def[k] = v
+        end
+
         if trigger_value.fn ~= nil then
-            -- 规则 2：如果是包含 fn 的 table，完全独立，不继承父 def
-            for k, v in pairs(trigger_value) do
-                sub_def[k] = v
-            end
+            -- 规则 2：有独立 fn，挂载带黑名单的元表
+            setmetatable(sub_def, filtered_mt)
         else
-            -- 规则 3：如果不包含 fn，则作为附加修饰，继承父 def 数据
+            -- 规则 3：没有独立 fn，挂载全量放行的元表
             setmetatable(sub_def, { __index = parent_def })
-            for k, v in pairs(trigger_value) do
-                sub_def[k] = v
-            end
         end
     else
         log.error("[NikkiManager] Invalid trigger_value type for skill '%s': %s", skill_id, type(trigger_value))
     end
+
     sub_def.is_sub = true
     sub_def.parent_skill = skill_id
     return sub_def
@@ -817,6 +848,40 @@ function NikkiManager:ToggleSetting(key)
         self:_SaveSettings()
     end
     return self._settings[key]
+end
+
+-- ============================================================
+-- Wiki 数据导出 API
+-- ============================================================
+
+function NikkiManager:GetWikiData()
+    local effect_resolver = self:GetResolver("effect")
+    local skill_resolver = self:GetResolver("skill")
+    local state_resolver = self:GetResolver("state")
+    local trigger_resolver = self:GetResolver("trigger")
+
+    local effect_items = effect_resolver:BuildWikiItemsByIds(effect_resolver:GetAllIds())
+    local skill_items = skill_resolver:BuildWikiItemsByIds(skill_resolver:GetAllIds())
+    local state_items = state_resolver:BuildWikiItemsByIds(state_resolver:GetAllIds())
+
+    for _, item in pairs(skill_items) do
+        item.triggers = trigger_resolver:GetTriggers(item.id)
+    end
+
+    return {
+        effects = effect_items,
+        skills = skill_items,
+        states = state_items
+    }
+end
+
+function NikkiManager:ExportWikiData()
+    local data = self:GetWikiData()
+    local success, str = pcall(json.encode, data)
+    if success then
+        TheSim:SetPersistentString("nikki_wiki_data.json", str, false)
+        log.info("[NikkiManager] Successfully exported wiki data to 'nikki_wiki_data.json'")
+    end
 end
 
 -- 单例出口
