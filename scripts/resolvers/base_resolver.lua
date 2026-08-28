@@ -3,15 +3,14 @@ local log = require("utils/log")
 
 local BaseResolver = Class(function(self, defs)
     self.defs = {}
-    if defs then
-        self:AddDefs(defs)
-    end
+    self:AddDefs(defs)
 end)
 
 -- 增量合并接口：多 Mod 调用此接口将自己的定义汇入全局池
 function BaseResolver:AddDefs(new_defs)
     if not new_defs or type(new_defs) ~= "table" then return end
-    for id, def in pairs(new_defs) do
+    local def_copy = deepcopy(new_defs)
+    for id, def in pairs(def_copy) do
         if self.defs[id] ~= nil then
             log.warn("[NikkiFramework] Conflict: ID '%s' already registered! Skipping later definition.", tostring(id))
         else
@@ -28,6 +27,15 @@ end
 -- 基础查表接口 O(1)
 function BaseResolver:GetDef(id)
     return self.defs[id]
+end
+
+function BaseResolver:GetDefCopy(id)
+    local def = self.defs[id]
+    if not def then
+        return nil
+    else
+        return deepcopy(def)
+    end
 end
 
 -- 获取所有数据字典

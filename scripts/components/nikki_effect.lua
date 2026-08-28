@@ -1,28 +1,63 @@
--- scripts/components/nikki_effect.lua
-local ResolverRegistry = require("nikki_resolver_registry")
 local log = require("utils/log")
-local TimerScheduler = require("utils/timer_scheduler") -- 新增
+local TimerScheduler = require("utils/timer_scheduler")
+local ResourceAdapter = require("adapters/resource_adapter")
+local ModifierAdapter = require("adapters/modifier_adapter")
+local NikkiManager = require("nikki_manager")
 
--- 私有懒加载：首次调用时向注册表查一次并缓存到 self._resolver，后续直接读缓存
-local function GetResolver(self)
-    if not self._resolver then
-        self._resolver = ResolverRegistry.Get("effect")
+-- ============================================================
+-- 内部辅助：资源速率处理
+-- ============================================================
+local function GetResourceRate(inst, id, def, context, kind)
+    local source = def[kind]
+    local rate = source and source.rate or 0
+    if type(rate) == "function" then
+        local ok, result = pcall(rate, inst, context)
+        if not ok then
+            log.error("[NikkiEffect] Error in %s rate func for '%s': %s", kind, id, tostring(result))
+            return 0
+        end
+        return result or 0
     end
-    return self._resolver
+    return rate * (context and context.layers or 1)
 end
 
+local function ApplyResourceRate(inst, id, def, context, kind)
+    local source = def[kind]
+    if not source then return end
+
+    local rate = GetResourceRate(inst, id, def, context, kind)
+    if context then
+        context[kind .. "_rate"] = rate
+    end
+
+    if kind == "regen" then
+        ResourceAdapter.SetRegen(inst, source.res, rate, id)
+    else
+        ResourceAdapter.SetDrain(inst, source.res, rate, id)
+    end
+end
+
+local function RemoveResourceRate(inst, id, def, context, kind)
+    local source = def[kind]
+    if not source then return end
+
+    local rate = context and context[kind .. "_rate"] or 0
+    if kind == "regen" then
+        ResourceAdapter.RemoveRegen(inst, source.res, rate, id)
+    else
+        ResourceAdapter.RemoveDrain(inst, source.res, rate, id)
+    end
+end
+
+-- ============================================================
+-- 组件主体
+-- ============================================================
 local NikkiEffect = Class(function(self, inst)
     self.inst = inst
     self._active_effects = {}
-    self._resolver = nil
-    self._scheduler = TimerScheduler(inst) -- 创建调度器
+    self._sources = {}
+    self._scheduler = TimerScheduler(inst)
 
-    self.inst:ListenForEvent("death", function()
-        log.debug("[NikkiEffect] %s died, clearing all active effects.", tostring(self.inst))
-        self:Clear()
-    end)
-
-    -- 监听 State 变化事件，精准清理绑定效果
     self.inst:ListenForEvent("nikki_state_dirty", function(owner, data)
         local new_state = data and data.state
         local to_remove = {}
@@ -36,10 +71,170 @@ local NikkiEffect = Class(function(self, inst)
             self:Remove(id, true)
         end
     end)
-
     self.inst:StartUpdatingComponent(self)
 end)
 
+-- ============================================================
+-- 内部私有方法
+-- ============================================================
+function NikkiEffect:_GetResolver()
+    return NikkiManager.GetInstance():GetResolver("effect")
+end
+
+function NikkiEffect:_GetDef(id)
+    local resolver = self:_GetResolver()
+    return resolver and resolver:GetDef(id)
+end
+
+function NikkiEffect:_GetOrCreateSources(id)
+    if not self._sources[id] then
+        self._sources[id] = {}
+    end
+    return self._sources[id]
+end
+
+function NikkiEffect:_AddSource(id, source)
+    if source == nil then return end
+    local sources = self:_GetOrCreateSources(id)
+    sources[source] = true
+end
+
+function NikkiEffect:_RemoveSource(id, source)
+    if source == nil or not self._sources[id] then return end
+    self._sources[id][source] = nil
+end
+
+function NikkiEffect:_ClearSources(id)
+    self._sources[id] = nil
+end
+
+function NikkiEffect:_PayActivationCost(id)
+    local def = self:_GetDef(id)
+    if not def or not def.cost or not def.cost.res or not def.cost.amount or def.cost.amount <= 0 then
+        return true
+    end
+
+    local current = ResourceAdapter.GetCurrent(self.inst, def.cost.res)
+    if current < def.cost.amount then
+        log.debug("[NikkiEffect] Activation failed: %s lacks %s for effect '%s'", tostring(self.inst), def.cost.res, id)
+        return false
+    end
+
+    ResourceAdapter.DoDelta(self.inst, def.cost.res, -def.cost.amount)
+    return true
+end
+
+function NikkiEffect:_OnEffectStart(id, context)
+    local def = self:_GetDef(id)
+    if not def then return end
+
+    if def.tags then
+        for _, tag in ipairs(def.tags) do
+            self.inst:AddTag(tag)
+        end
+    end
+    if def.on_apply then
+        local ok, err = pcall(def.on_apply, self.inst, context)
+        if not ok then
+            log.error("[NikkiEffect] Error applying effect '%s' to %s: %s", id, tostring(self.inst), tostring(err))
+        end
+    end
+end
+
+function NikkiEffect:_OnEffectEnd(id, context)
+    local def = self:_GetDef(id)
+    if not def then return end
+
+    if def.tags then
+        for _, tag in ipairs(def.tags) do
+            self.inst:RemoveTag(tag)
+        end
+    end
+    if def.mods then
+        for mod_type, _ in pairs(def.mods) do
+            ModifierAdapter.Remove(self.inst, mod_type, id)
+        end
+    end
+    RemoveResourceRate(self.inst, id, def, context, "regen")
+    RemoveResourceRate(self.inst, id, def, context, "drain")
+    if def.on_remove then
+        local ok, err = pcall(def.on_remove, self.inst, context)
+        if not ok then
+            log.error("[NikkiEffect] Error removing effect '%s' from %s: %s", id, tostring(self.inst), tostring(err))
+        end
+    end
+end
+
+function NikkiEffect:_UpdateEffectLayers(id, context)
+    local def = self:_GetDef(id)
+    if not def then return end
+
+    if def.mods then
+        for mod_type, value in pairs(def.mods) do
+            ModifierAdapter.Apply(self.inst, mod_type, value, id)
+        end
+    end
+    ApplyResourceRate(self.inst, id, def, context, "regen")
+    ApplyResourceRate(self.inst, id, def, context, "drain")
+
+    if type(def.on_layer_update) == "function" then
+        local ok, err = pcall(def.on_layer_update, self.inst, context)
+        if not ok then
+            log.error("[NikkiEffect] Error updating layers for effect '%s' on %s: %s", id, tostring(self.inst),
+                tostring(err))
+        end
+    end
+end
+
+function NikkiEffect:_OnUpdateEffect(id, dt, context)
+    local def = self:_GetDef(id)
+    if not def then return false end
+
+    if def.drain and def.drain.res and context and context.drain_rate and context.drain_rate > 0 then
+        local current = ResourceAdapter.GetCurrent(self.inst, def.drain.res)
+        if current <= 0.01 then
+            local on_deplete = def.drain.on_deplete or "remove"
+            if on_deplete == "remove" then
+                log.debug("[NikkiEffect] Effect '%s' on %s auto-removed due to insufficient %s (current: %.2f)", id,
+                    tostring(self.inst), def.drain.res, current)
+                return false
+            end
+            context.is_depleted = true
+        else
+            context.is_depleted = false
+        end
+    end
+
+    if def.fn then
+        local ok, result = pcall(def.fn, self.inst, dt, context)
+        if not ok then
+            log.error("[NikkiEffect] Error in effect function for '%s': %s", id, tostring(result))
+        elseif result == false then
+            log.debug("[NikkiEffect] Effect function for '%s' returned false, auto-removing effect", id)
+            return false
+        end
+    end
+
+    return true
+end
+
+function NikkiEffect:_ScheduleEffect(id)
+    local active = self._active_effects[id]
+    if not active or #active.context.end_times == 0 then return end
+    local nearest = math.min(unpack(active.context.end_times))
+    local duration = math.max(0, nearest - GetTime())
+    if duration > 0 then
+        self._scheduler:Schedule(id, duration, function()
+            self:Remove(id, false)
+        end)
+    else
+        self:Remove(id, false)
+    end
+end
+
+-- ============================================================
+-- 公开查询 API
+-- ============================================================
 function NikkiEffect:HasEffect(id)
     return self._active_effects[id] ~= nil
 end
@@ -48,34 +243,42 @@ function NikkiEffect:GetLayers(id)
     return self._active_effects[id] and self._active_effects[id].layers or 0
 end
 
--- ============================================
--- 公开 API：施加 Effect
--- ============================================
-function NikkiEffect:Apply(id, source)
-    local resolver = GetResolver(self)
-    if not resolver then return false end
+function NikkiEffect:GetSources(id)
+    return self._sources[id] or {}
+end
 
-    -- 安全屏障：若实体死亡则禁止挂载新效果
-    if self.inst.components.health and self.inst.components.health:IsDead() then
-        return false
-    end
+function NikkiEffect:IsPermanent(id)
+    local resolver = self:_GetResolver()
+    if not resolver then return false end
+    local duration, _, _ = resolver:GetEffectConfig(id)
+    return duration == nil
+end
+
+-- ============================================================
+-- 公开操作 API
+-- ============================================================
+function NikkiEffect:Apply(id, source)
+    local resolver = self:_GetResolver()
+    if not resolver then return false end
 
     local duration, max, mode, bind_to_state = resolver:GetEffectConfig(id)
     local active = self._active_effects[id]
-    log.debug("[NikkiEffect] Applying effect '%s' on %s (duration: %s, max: %d, mode: %s)", tostring(id),
-        tostring(self.inst), tostring(duration), max, mode)
 
-    -- 情况 A：首次挂载
+    self:_AddSource(id, source)
+
     if not active then
-        if not resolver:PayActivationCost(self.inst, id) then
+        if not self:_PayActivationCost(id) then
+            self:_ClearSources(id)
             return false
         end
 
+        local def = resolver:GetDef(id)
         local context = {
-            layer = 1,
+            def = def,
+            layers = 1,
             start_time = GetTime(),
             end_times = {},
-            source = source,
+            sources = self:_GetOrCreateSources(id),
             data = {},
             max = max,
             bound_state = (bind_to_state and self.inst.components.nikki_state) and
@@ -96,37 +299,34 @@ function NikkiEffect:Apply(id, source)
         }
         active = self._active_effects[id]
 
-        resolver:OnEffectStart(self.inst, id, active.context)
-        resolver:UpdateEffectLayers(self.inst, id, 1, active.context)
+        self:_OnEffectStart(id, active.context)
+        self:_UpdateEffectLayers(id, active.context)
 
-        -- 使用调度器管理到期
         if duration and duration > 0 then
             table.insert(active.context.end_times, GetTime() + duration)
             self._scheduler:Schedule(id, duration, function()
-                self:Remove(id, false) -- 移除一层
+                self:Remove(id, false)
             end)
         end
+        log.debug("[NikkiEffect] Apply effect '%s' to %s with duration %.2f and max layers %d.", tostring(id),
+            tostring(self.inst), duration or 0, max or 1)
         return true
     end
 
-    -- 情况 B：已存在，处理叠加模式
     if mode == "toggle" then
-        self:Remove(id, true)
+        self:Remove(id, true, source)
+        log.debug("[NikkiEffect] Effect %s is already active on %s, toggling off.", tostring(id), tostring(self.inst))
         return true
     elseif mode == "ignore" then
         log.debug("[NikkiEffect] Effect %s is already active on %s, ignoring new application.", tostring(id),
             tostring(self.inst))
         return false
     elseif mode == "refresh" then
-        -- 刷新：重置所有层的时间
-        -- 清空所有待处理的定时器，然后重新添加所有层的时间
         self._scheduler:Cancel(id)
         active.context.end_times = {}
-        -- 为每一层重新设定到期时间（假设所有层都刷新到新的 duration）
         for i = 1, active.layers do
             table.insert(active.context.end_times, GetTime() + duration)
         end
-        -- 调度新的定时器（使用最后一个到期时间，因为所有层同时刷新，所以所有层同时到期）
         if duration and duration > 0 then
             self._scheduler:Schedule(id, duration, function()
                 self:Remove(id, false)
@@ -134,20 +334,16 @@ function NikkiEffect:Apply(id, source)
         end
         return true
     elseif mode == "add" then
-        -- 叠加：增加一层
         if active.layers < max then
             active.layers = active.layers + 1
-            active.context.layer = active.layers
-            resolver:UpdateEffectLayers(self.inst, id, active.layers, active.context)
+            active.context.layers = active.layers
+            self:_UpdateEffectLayers(id, active.context)
             if duration and duration > 0 then
                 table.insert(active.context.end_times, GetTime() + duration)
-                -- 重新调度，因为新层可能比现有层更早到期
-                -- 取消旧定时器，重新计算最近到期时间
                 self._scheduler:Cancel(id)
                 self:_ScheduleEffect(id)
             end
         else
-            -- 达到上限：替换最老的一层（FIFO）
             if #active.context.end_times > 0 then
                 table.remove(active.context.end_times, 1)
             end
@@ -161,105 +357,60 @@ function NikkiEffect:Apply(id, source)
     end
 end
 
--- 内部辅助：为某个 effect 调度定时器（基于其最近的到期时间）
-function NikkiEffect:_ScheduleEffect(id)
+function NikkiEffect:Remove(id, force_all, source)
     local active = self._active_effects[id]
-    if not active or #active.context.end_times == 0 then return end
-    local nearest = math.min(unpack(active.context.end_times))
-    local duration = math.max(0, nearest - GetTime())
-    if duration > 0 then
-        self._scheduler:Schedule(id, duration, function()
-            self:Remove(id, false)
-        end)
-    else
-        self:Remove(id, false)
+    if not active then return end
+
+    if source ~= nil then
+        self:_RemoveSource(id, source)
     end
-end
-
--- ============================================
--- 公开 API：移除 Effect
--- force_all: true 直接清空所有层数，false 按层递减
--- ============================================
-function NikkiEffect:Remove(id, force_all)
-    local resolver = GetResolver(self)
-    if not resolver or not self._active_effects[id] then return end
-
-    local active = self._active_effects[id]
 
     if not force_all then
-        -- 移除最老的一层 (FIFO)
         if #active.context.end_times > 0 then
             table.remove(active.context.end_times, 1)
         end
         active.layers = active.layers - 1
     else
-        -- 清空所有层
         active.context.end_times = {}
         active.layers = 0
     end
 
     if active.layers <= 0 then
-        -- 完全移除
         self._scheduler:Cancel(id)
-        resolver:OnEffectEnd(self.inst, id, active.context)
+        self:_OnEffectEnd(id, active.context)
         self._active_effects[id] = nil
-        log.debug("[NikkiEffect] Effect '%s' on %s fully removed.", tostring(id), tostring(self.inst))
+        self:_ClearSources(id)
+        log.debug("[NikkiEffect] Remove effect '%s' fully on %s.", tostring(id), tostring(self.inst))
     else
-        -- 剩余层，更新层数并重新调度定时器
-        active.context.layer = active.layers
-        resolver:UpdateEffectLayers(self.inst, id, active.layers, active.context)
+        active.context.layers = active.layers
+        self:_UpdateEffectLayers(id, active.context)
         self._scheduler:Cancel(id)
         self:_ScheduleEffect(id)
-        log.debug("[NikkiEffect] Effect '%s' on %s reduced to %d layers.", tostring(id), tostring(self.inst),
+        log.debug("[NikkiEffect] Reduced effect '%s' on %s to %d layers.", tostring(id), tostring(self.inst),
             active.layers)
     end
 end
 
--- ============================================
--- 公开 API：查询 Effect 是否为永久效果
--- ============================================
-function NikkiEffect:IsPermanent(id)
-    local resolver = GetResolver(self)
-    if not resolver then return false end
-    local duration, _, _ = resolver:GetEffectConfig(id)
-    return duration == nil
-end
-
-function NikkiEffect:Toggle(id)
+function NikkiEffect:Toggle(id, source)
     if self:HasEffect(id) then
-        self:Remove(id, true)
+        self:Remove(id, true, source)
     else
-        self:Apply(id)
+        self:Apply(id, source)
     end
 end
 
--- ============================================
--- 清空所有激活的 Effect
--- ============================================
 function NikkiEffect:Clear()
     self._scheduler:Clear()
     for id, active in pairs(self._active_effects) do
-        local resolver = GetResolver(self)
-        if resolver then
-            resolver:OnEffectEnd(self.inst, id, active.context)
-        end
+        self:_OnEffectEnd(id, active.context)
     end
     self._active_effects = {}
+    self._sources = {}
 end
 
--- ============================================
--- 帧更新：处理业务 Tick 与持续扣费
--- ============================================
 function NikkiEffect:OnUpdate(dt)
-    local resolver = GetResolver(self)
-    if not resolver then return end
-
-    if self.inst.components.health and self.inst.components.health:IsDead() then
-        return
-    end
-
     for id, active in pairs(self._active_effects) do
-        local should_keep = resolver:OnUpdateEffect(self.inst, id, dt, active.context, active.layers)
+        local should_keep = self:_OnUpdateEffect(id, dt, active.context)
         if not should_keep then
             self:Remove(id, true)
         end
