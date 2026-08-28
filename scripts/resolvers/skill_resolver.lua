@@ -154,7 +154,9 @@ function SkillResolver:OnDefAdded(id, def)
     end
     def.targeting.reticule = reticule
     -- 轮盘相关配置
+    def.is_wheel = false
     if def.wheel then
+        def.is_wheel = true
         def.wheel.label = def.wheel.label or self:GetDisplayName(id)
         def.wheel.widget_scale = def.wheel.widget_scale or 0.6
         local user_checkenabled = def.wheel.checkenabled
@@ -355,5 +357,50 @@ function SkillResolver:BuildWheelItemsByIds(skill_ids)
     end)
     return items
 end
+
+
+function SkillResolver:BuildWikiItemsByIds(ids)
+    local items = {}
+    for _, id in ipairs(ids) do
+        local def = self:GetDefCopy(id)
+        if def then
+            local item = {
+                id = id,
+                is_passive = def.fn == nil and true or false,
+                is_toggle = def.is_toggle or false,
+                is_wheel = def.is_wheel or false,
+                is_sub = def.is_sub or false,
+                client_only = def.client_only or false,
+                -- 挂载
+                sub_skills = def._sub_skills,
+                effects = def.effects,
+                params = def.params,
+                tags = def.tags,
+                -- 执行
+                range = def.range ,
+                cost = def.cost,
+                cd = def.cd ,
+                required_tags = def.required_tags,
+            }
+            if def.aoe then
+                item.aoe = {
+                    anchor = def.aoe.anchor,
+                    radius = def.aoe.radius,
+                }
+            end
+            table.insert(items, item)
+        end
+    end
+    table.sort(items, function(a, b)
+        local pa = a.priority or 0
+        local pb = b.priority or 0
+        if pa == pb then
+            return a.id < b.id
+        end
+        return pa > pb
+    end)
+    return items
+end
+
 
 return SkillResolver

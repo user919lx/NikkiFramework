@@ -14,6 +14,7 @@ end
 -- 编译
 -- ============================================================
 function EffectResolver:OnDefAdded(id, def)
+    def.is_aura = def.aura ~= nil
     if def.aura then
         local raw_effect = def.aura.effect
         local aura_effect_id = nil
@@ -74,7 +75,6 @@ function EffectResolver:OnDefAdded(id, def)
                 old_on_remove(inst, context)
             end
         end
-
         def.aura = nil
     end
 end
@@ -98,4 +98,24 @@ function EffectResolver:HasFn(id)
     return def and type(def.fn) == "function"
 end
 
+function EffectResolver:BuildWikiItemsByIds(ids)
+    local items = {}
+    for _, id in ipairs(ids) do
+        local def = self:GetDef(id)
+        if def then
+            table.insert(items, {
+                id = id,
+                duration = def.duration,
+                stack = def.stack,
+                mods = def.mods,
+                tags = def.tags,
+                drain = def.drain,
+                regen = def.regen,
+                cost = def.cost,
+                is_aura = def.is_aura or false,
+            })
+        end
+    end
+    return items
+end
 return EffectResolver

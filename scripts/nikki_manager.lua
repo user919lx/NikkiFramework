@@ -864,8 +864,16 @@ function NikkiManager:GetWikiData()
     local skill_items = skill_resolver:BuildWikiItemsByIds(skill_resolver:GetAllIds())
     local state_items = state_resolver:BuildWikiItemsByIds(state_resolver:GetAllIds())
 
+    -- 额外装填和处理
     for _, item in pairs(skill_items) do
-        item.triggers = trigger_resolver:GetTriggers(item.id)
+        local triggers = trigger_resolver:GetTriggers(item.id)
+        if type(triggers) == "table" and next(triggers) ~= nil then
+            item.triggers = triggers
+            -- 如果技能有触发器，并且没有子技能，则标记为被动技能
+            if item.is_passive == false and item.is_sub == false and item.sub_skills == nil then
+                item.is_passive = true
+            end
+        end
     end
 
     return {
