@@ -1,7 +1,5 @@
 -- scripts/prefabs/nikki_range_indicator.lua
 local log = require("utils/log")
-local NikkiClientSettings = require("nikki_client_settings")
-
 local TEXTURE_SIZE = 1900
 local assets = {
     Asset("ANIM", "anim/firefighter_placement.zip"),
@@ -11,8 +9,11 @@ local function CalcScaleByRange(range)
     return math.sqrt(range * 300 / TEXTURE_SIZE)
 end
 
-local function ApplyScale(inst)
-    local scale = CalcScaleByRange(inst._range)
+-- ============================================================
+-- ApplyScale：根据传入的 range 计算并应用缩放
+-- ============================================================
+local function ApplyScale(inst, range)
+    local scale = CalcScaleByRange(range)
     local owner = inst.owner
     if owner and owner.Transform then
         local sx, sy, sz = owner.Transform:GetScale()
@@ -25,41 +26,59 @@ local function ApplyScale(inst)
     end
 end
 
--- 统一处理显隐逻辑：只有 (开关开启) 且 (射程 > 0) 时才显示
+-- ============================================================
+-- UpdateVisibility：决定显示/隐藏 + 应用缩放
+-- ============================================================
 local function UpdateVisibility(inst)
-    if inst._is_toggled_on and inst._range > 0 then
+    local should_show = false
+    local display_range = 0
+
+    if inst._override_active then
+        should_show = inst._override_range and inst._override_range > 0
+        display_range = inst._override_range or 0
+        log.debug("[Nikki Range Indicator] Override mode active: should_show=%s, display_range=%s", tostring(should_show),
+            display_range)
+    else
+        should_show = inst._is_toggled_on and inst._range > 0
+        display_range = inst._range
+        log.debug("[Nikki Range Indicator] Normal mode: should_show=%s, display_range=%s", tostring(should_show),
+            display_range)
+    end
+
+    if should_show then
+        ApplyScale(inst, display_range)
         inst:Show()
     else
         inst:Hide()
     end
 end
 
+-- ============================================================
+-- SetRange：只更新 _range 数据
+-- ============================================================
 local function SetRange(inst, range)
     local value = tonumber(range) or 0
     inst._range = value
-
-    if value > 0 then
-        ApplyScale(inst)
-    end
-
     UpdateVisibility(inst)
 end
 
-local function Attach(inst, owner)
+function SetOwner(inst, owner)
     if owner and owner.entity then
         inst.owner = owner
         inst.entity:SetParent(owner.entity)
 
-        -- ==========================================================
-        -- 初始化：使用通用 API 传入 "show_range" 读取
-        -- ==========================================================
-        inst._is_toggled_on = NikkiClientSettings.Get("show_range")
+        inst._override_active = false
+        inst._override_range = nil
+        inst._range = 0
+        inst._is_toggled_on = false
 
         inst:ListenForEvent("skill_range_toggle_changed", function(owner_inst, data)
             if data ~= nil and data.new_state ~= nil then
                 log.debug("[Nikki Range Indicator] Received toggle event: new_state = %s", tostring(data.new_state))
                 inst._is_toggled_on = data.new_state
-                UpdateVisibility(inst)
+                if not inst._override_active then
+                    UpdateVisibility(inst)
+                end
             end
         end, owner)
 
@@ -75,37 +94,67 @@ local function Attach(inst, owner)
     end
 end
 
+-- ============================================================
+-- 覆盖模式：进入瞄准状态时调用
+-- ============================================================
+function EnterOverride(inst, skill_range)
+    if skill_range == nil or skill_range <= 0 then
+        return
+    end
+
+    inst._override_active = true
+    inst._override_range = skill_range
+    UpdateVisibility(inst)
+
+    log.debug("[Nikki Range Indicator] Entered override mode with range: %s", skill_range)
+end
+
+-- ============================================================
+-- 退出覆盖模式：退出瞄准时调用
+-- ============================================================
+function ExitOverride(inst)
+    if not inst._override_active then
+        return
+    end
+
+    inst._override_active = false
+    inst._override_range = nil
+    UpdateVisibility(inst)
+
+    log.debug("[Nikki Range Indicator] Exited override mode")
+end
+
 local function fn()
     local inst = CreateEntity()
-
     inst.entity:AddTransform()
     inst.entity:AddAnimState()
-
     inst.entity:SetCanSleep(false)
     inst.persists = false
 
-    inst:AddTag("CLASSIFIED")
     inst:AddTag("NOCLICK")
     inst:AddTag("FX")
-    inst:AddTag("placer")
 
     inst.AnimState:SetBank("firefighter_placement")
     inst.AnimState:SetBuild("firefighter_placement")
     inst.AnimState:PlayAnimation("idle", true)
-    inst.AnimState:SetLightOverride(1)
     inst.AnimState:SetOrientation(ANIM_ORIENTATION.OnGround)
-    inst.AnimState:SetLayer(LAYER_BACKGROUND)
-    inst.AnimState:SetSortOrder(1)
-    inst.AnimState:SetAddColour(.5, .1, .2, 0)
-
+    inst.AnimState:SetLayer(LAYER_WORLD_BACKGROUND)
+    inst.AnimState:SetSortOrder(3)
+    inst.AnimState:SetMultColour(1, .75, 0, 1)
+    inst.AnimState:SetBloomEffectHandle("shaders/anim.ksh")
     inst:Hide()
 
     inst.owner = nil
     inst._range = 0
-    inst._is_toggled_on = false 
+    inst._is_toggled_on = false
+    inst._override_active = false
+    inst._override_range = nil
 
     inst.SetRange = SetRange
-    inst.Attach = Attach
+    inst.SetOwner = SetOwner
+
+    inst.EnterOverride = EnterOverride
+    inst.ExitOverride = ExitOverride
 
     return inst
 end

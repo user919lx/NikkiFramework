@@ -114,11 +114,11 @@ return {
         },
         duration = 5, -- 持续 5 秒
         -- 施加效果时的额外处理，这里加了一个泛光效果
-        on_apply = function(inst, def, context)
+        on_apply = function(inst, context)
             inst.AnimState:SetBloomEffectHandle("shaders/anim.ksh")
         end,
         -- 移除效果时的额外处理，这里清除了泛光效果
-        on_remove = function(inst, def, context)
+        on_remove = function(inst, context)
             inst.AnimState:ClearBloomEffectHandle()
         end,
     },

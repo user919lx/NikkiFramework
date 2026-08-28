@@ -1,6 +1,6 @@
 local Badge = require "widgets/badge"
 local UIAnim = require "widgets/uianim"
-local ResourceAdapter = require("utils/resource_adapter")
+local ResourceAdapter = require("adapters/resource_adapter")
 
 local NikkiBadge = Class(Badge, function(self, owner)
     -- 参数：(anim, owner, [1]tint, [2]iconbuild, [3]circular_meter, [4]use_clear_bg, [5]dont_update_while_paused, [6]bonustint)

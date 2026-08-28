@@ -1,14 +1,5 @@
 local log = require("utils/log")
 
-local function GetCasterOwner(inst)
-    local parent = inst.entity:GetParent()
-    if parent and parent:IsValid() then return parent end
-    if inst.components.inventoryitem and inst.components.inventoryitem:GetGrandOwner() then
-        return inst.components.inventoryitem:GetGrandOwner()
-    end
-    return not TheWorld.ismastersim and ThePlayer or nil
-end
-
 local function Attach(inst, owner)
     if not owner then return end
     inst.entity:SetParent(owner.entity)
@@ -22,24 +13,49 @@ local function Attach(inst, owner)
         owner.components.inventory.CanAccessItem = function(self, item)
             -- 若校验的对象是当前虚拟施法器，直接无条件放行
             if item == inst then
-                log.debug("[Nikki Spell Caster] '%s' 正在校验物品 '%s' 的访问权限，已放行。", tostring(owner), tostring(item))
                 return true
             end
             return _CanAccessItem(self, item)
         end
     end
 end
+local function CheckAndLinkParent(inst)
+    local parent = inst.entity:GetParent()
+    if parent ~= nil then
+        -- 1. 成功找到宿主，清理任务
+        if inst._link_task ~= nil then
+            inst._link_task:Cancel()
+            inst._link_task = nil
+        end
+        inst._link_attempts = nil
+
+        -- 2. 绑定数据
+        parent.spell_caster = inst
+        if inst.replica.inventoryitem then
+            inst.replica.inventoryitem.IsGrandOwner = function(self, guy) return guy == parent end
+        end
+        -- 3. 发送就绪事件
+        parent:PushEvent("nikki_spell_caster_ready", inst)
+    else
+        -- 找不到宿主时，增加重试计数
+        inst._link_attempts = (inst._link_attempts or 0) + 1
+        -- 超时检测：60 次约等于 2 秒（饥荒默认 30 TPS）
+        if inst._link_attempts > 60 then
+            if inst._link_task ~= nil then
+                inst._link_task:Cancel()
+                inst._link_task = nil
+            end
+            inst._link_attempts = nil
+            log.warn("[Nikki Spell Caster] Failed to link to parent after 60 attempts")
+            if not TheWorld.ismastersim then inst:Remove() end
+        end
+    end
+end
 
 local function OnEntityReplicated(inst)
-    inst:DoTaskInTime(1, function()
-        local parent = inst.entity:GetParent()
-        if parent ~= nil then
-            parent.spell_caster = inst
-            if inst.replica.inventoryitem then
-                inst.replica.inventoryitem.IsGrandOwner = function(self, guy) return guy == parent end
-            end
-        end
-    end)
+    inst._link_attempts = 0
+    -- 0 代表每一帧执行一次
+    inst._link_task = inst:DoPeriodicTask(0, CheckAndLinkParent)
 end
 
 local function fn()
@@ -52,44 +68,7 @@ local function fn()
     inst:AddTag("NOCLICK")
 
     inst:AddComponent("aoetargeting")
-    inst.components.aoetargeting:SetAllowWater(false)
-
     inst:AddComponent("spellbook")
-    inst.components.spellbook:SetRadius(100)
-    inst.components.spellbook:SetFocusRadius(102)
-
-    -- 拦截 OpenSpellBook：向宿主的 Replica 索要最新的轮盘数据
-    local _OpenSpellBook = inst.components.spellbook.OpenSpellBook
-    inst.components.spellbook.OpenSpellBook = function(self, user)
-        if user and user.replica.nikki_skillwheel then
-            local valid_items = user.replica.nikki_skillwheel:GetWheelItems()
-            if #valid_items == 0 then
-                log.warn("[Nikki Spell Caster] '%s' 当前状态及 Tag 下没有可用的轮盘技能。", tostring(user))
-                return false
-            end
-            self:SetItems(valid_items)
-            return _OpenSpellBook(self, user)
-        end
-        return false
-    end
-    local _SelectSpell = inst.components.spellbook.SelectSpell
-    inst.components.spellbook.SelectSpell = function(self, index)
-        local owner = GetCasterOwner(self.inst)
-        if owner and owner.replica.nikki_skillwheel then
-            local valid_items = owner.replica.nikki_skillwheel:GetWheelItems()
-            self:SetItems(valid_items)
-        end
-        return _SelectSpell(self, index)
-    end
-    local _CanBeUsedBy = inst.components.spellbook.CanBeUsedBy
-    inst.components.spellbook.CanBeUsedBy = function(self, user)
-        if user and user.replica.nikki_skillwheel then
-            local valid_items = user.replica.nikki_skillwheel:GetWheelItems()
-            self:SetItems(valid_items)
-        end
-        return _CanBeUsedBy(self, user)
-    end
-
     inst.entity:SetPristine()
 
     if not TheWorld.ismastersim then

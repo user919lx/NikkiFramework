@@ -36,7 +36,25 @@ return function()
     local success = pcall(function() ModifierAdapter.Apply(inst, "unknown", 1, "src") end)
     suite:assert(success == true, "未知的 mod_type 应当安全输出 warning，而不导致崩溃")
 
-    -- D. 测试 Remove 清理
+    -- D. 测试 init 在注册时执行，并可访问 mod 环境
+    local init_called = false
+    local env = {
+        AddComponentPostInit = function(component_name, cb)
+            init_called = true
+            suite:assert(component_name == "health", "env.AddComponentPostInit 传入正确的组件名")
+            suite:assert(type(cb) == "function", "env.AddComponentPostInit 传入正确的回调")
+        end,
+    }
+    ModifierAdapter.RegisterStrategy("init_test", {
+        init = function(mod_env)
+            mod_env.AddComponentPostInit("health", function() end)
+        end,
+        apply = function() end,
+        remove = function() end,
+    }, env)
+    suite:assert(init_called == true, "自定义修饰器的 init 会在注册时执行，并接收 mod env")
+
+    -- E. 测试 Remove 清理
     ModifierAdapter.Remove(inst, "dmg_taken", "test_src")
     suite:assert(def_mod == 0, "DmgTaken 修饰器被成功移除")
 
