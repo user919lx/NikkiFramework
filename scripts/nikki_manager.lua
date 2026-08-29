@@ -879,7 +879,7 @@ function NikkiManager:GetWikiData()
     return {
         effects = effect_items,
         skills = skill_items,
-        states = state_items
+        states = state_items,
     }
 end
 

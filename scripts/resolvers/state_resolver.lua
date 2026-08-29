@@ -77,6 +77,7 @@ function StateResolver:BuildWikiItemsByIds(ids)
             table.insert(items, {
                 id = id,
                 skills = def.skills,
+                tags = def.tags,
                 keys = formatted_keys, -- 输出为 {"KEY_Z": "fireball"} 对象形式
             })
         end

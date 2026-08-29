@@ -1,7 +1,7 @@
 # Nikki Framework
 
 > 使用前需要在创意工坊订阅本框架：
-> https://steamcommunity.com/sharedfiles/filedetails/?id=3781535033
+> https://steamcommunity.com/sharedfiles/filedetails/?id=3781535039
 
 Nikki Framework 是一个面向《饥荒联机版》的技能底层框架。它已经把技能系统中常见的公共逻辑抽象好了：状态管理、触发器分发、资源消耗、能力切换与生命周期控制等，都由框架统一处理。这样，Mod 开发者可以直接基于这套现成结构去实现自己的角色、技能与玩法，而不需要再从零搭一套底层能力系统。
 
