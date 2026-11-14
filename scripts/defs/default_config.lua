@@ -6,7 +6,8 @@ return {
     -- 基础定义文件路径
     -- ========================================================
     defs = {
-        actions = "defs/default_action_defs"
+        actions = "defs/default_action_defs",
+        sgs = "defs/default_sg_defs",
     },
     -- ========================================================
     -- 自定义基础属性修饰 (Modifiers)
