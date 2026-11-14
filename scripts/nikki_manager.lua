@@ -396,8 +396,8 @@ function NikkiManager:_LoadFrameworkResources(config, mod_env)
         end)
     end
 
-    if defs.sg then
-        loadFile(defs.sg, function(sg_data)
+    if defs.sgs then
+        loadFile(defs.sgs, function(sg_data)
             if sg_data.sgs then
                 for sg, sg_states in pairs(sg_data.sgs) do
                     for _, state in pairs(sg_states) do
